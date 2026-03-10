@@ -1,0 +1,87 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,600;1,9..144,300&family=DM+Mono:wght@300;400;500&family=Outfit:wght@300;400;600&display=swap');
+
+:root {
+  --ink: #0e0d0b;
+  --cream: #f5f0e8;
+  --sand: #e8dfc8;
+  --rust: #c4562a;
+  --rust-light: #e8703f;
+  --muted: #8a7f6e;
+  --border: #d4c9b0;
+  --glass: rgba(255, 255, 255, 0.7);
+  --transition-slow: 0.8s cubic-bezier(0.7, 0, 0.3, 1);
+  --transition-mid: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Outfit', sans-serif;
+  background: var(--ink);
+  /* Match the premium dark mode of landing */
+  color: #fff;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Common Background Orbs */
+.bg-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  filter: blur(100px);
+}
+
+.orb {
+  position: absolute;
+  border-radius: 50%;
+  opacity: 0.4;
+  animation: float 20s infinite alternate ease-in-out;
+}
+
+.orb-1 {
+  width: 600px;
+  height: 600px;
+  background: #d4956a;
+  top: -10%;
+  right: -10%;
+  animation-duration: 25s;
+}
+
+.orb-2 {
+  width: 500px;
+  height: 500px;
+  background: #b5c4a0;
+  bottom: -10%;
+  left: -10%;
+  animation-delay: -5s;
+}
+
+@keyframes float {
+  0% {
+    transform: translate(0, 0) scale(1) rotate(0deg);
+  }
+
+  33% {
+    transform: translate(60px, -30px) scale(1.1) rotate(5deg);
+  }
+
+  66% {
+    transform: translate(-30px, 60px) scale(0.9) rotate(-5deg);
+  }
+
+  100% {
+    transform: translate(0, 0) scale(1) rotate(0deg);
+  }
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  font-family: inherit;
+}

@@ -1,0 +1,21 @@
+# Ignore node_modules
+node_modules/
+frontend/node_modules/
+
+# Ignore Python compiled files
+__pycache__/
+*.pyc
+
+# Ignore Environment Variables (CRITICAL)
+.env
+
+# Ignore Local Databases & Backups (CRITICAL)
+user_backups.csv
+
+# Ignore Local Test Outputs / Temporary files
+test_out.txt
+dataset (1).tsv
+test_ddgs.py
+test_domain_verifier.py
+test_native_ddg.py
+chrome_extension/

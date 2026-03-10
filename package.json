@@ -1,0 +1,13 @@
+{
+  "name": "dark-pattern-detection",
+  "version": "2.0.0",
+  "description": "Integrated Dark Pattern Detection System",
+  "scripts": {
+    "start": "concurrently \"py app.py\" \"cd frontend && npm run dev\"",
+    "backend": "py app.py",
+    "frontend": "cd frontend && npm run dev"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

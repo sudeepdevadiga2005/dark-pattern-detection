@@ -1,0 +1,183 @@
+.client-home-wrapper {
+    min-height: 100vh;
+    background-color: #0b0c0e;
+    background-image: url('../assets/bg-client.png');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+    color: #fff;
+    font-family: 'Outfit', sans-serif;
+    position: relative;
+    z-index: 1;
+}
+
+.client-home-wrapper::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(11, 12, 14, 0.4);
+    /* Less opaque overlay so image shows through */
+    z-index: -1;
+}
+
+.client-nav {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 30px 60px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    background: rgba(11, 12, 14, 0.9);
+    backdrop-filter: blur(40px);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.nav-actions {
+    display: flex;
+    align-items: center;
+    gap: 30px;
+}
+
+.user-welcome {
+    opacity: 0.6;
+}
+
+button.logout-pill {
+    padding: 12px 30px;
+    background: rgba(245, 101, 101, 0.15);
+    border: 1px solid rgba(245, 101, 101, 0.6);
+    border-radius: 40px;
+    color: #ff6b6b;
+    font-size: 15px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+button.logout-pill:hover {
+    background: #f56565;
+    color: #fff;
+    box-shadow: 0 4px 25px rgba(245, 101, 101, 0.6);
+    transform: translateY(-2px);
+    border-color: #f56565;
+}
+
+.client-main {
+    max-width: 1200px;
+    margin: 60px auto;
+    padding: 0 40px;
+}
+
+.client-header {
+    text-align: center;
+    margin-bottom: 60px;
+}
+
+.client-header h1 {
+    font-family: 'Fraunces', serif;
+    font-size: 52px;
+    font-weight: 400;
+    margin-bottom: 15px;
+}
+
+.client-header p {
+    font-size: 18px;
+    opacity: 0.5;
+}
+
+.tools-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 30px;
+}
+
+.tool-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 40px;
+    border-radius: 32px;
+    display: flex;
+    justify-content: space-between;
+    transition: all 0.3s;
+}
+
+.tool-card:hover {
+    background: rgba(255, 107, 107, 0.02);
+    border-color: rgba(255, 107, 107, 0.2);
+}
+
+.main-tool {
+    grid-column: 1 / -1;
+    background: rgba(196, 86, 42, 0.05);
+    border-color: rgba(196, 86, 42, 0.2);
+}
+
+.tool-content .tag {
+    display: inline-block;
+    background: rgba(196, 86, 42, 0.15);
+    color: #c4562a;
+    padding: 4px 12px;
+    border-radius: 40px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 15px;
+}
+
+.tool-content h3 {
+    font-size: 24px;
+    margin-bottom: 12px;
+}
+
+.tool-content p {
+    font-size: 15px;
+    opacity: 0.6;
+    margin-bottom: 25px;
+    max-width: 400px;
+}
+
+.btn-launch {
+    display: inline-block;
+    background: #fff;
+    color: #000;
+    padding: 14px 40px;
+    border-radius: 40px;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.btn-link {
+    color: #c4562a;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 15px;
+}
+
+.tool-icon {
+    font-size: 64px;
+    opacity: 0.15;
+}
+
+.fade-in {
+    animation: fadeIn 0.8s ease-out forwards;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
