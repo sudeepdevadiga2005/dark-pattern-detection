@@ -23,7 +23,7 @@ const WebScraper = () => {
         setResults(null);
 
         try {
-            const res = await axios.post("http://localhost:5000/scrape-details", { url });
+            const res = await axios.post("https://dark-pattern-api.onrender.com/scrape-details", { url });
 
             if (res.data.success) {
                 setResults(res.data);
@@ -53,7 +53,7 @@ const WebScraper = () => {
         setResults(null);
 
         try {
-            const res = await axios.post("http://localhost:5000/analyze", { url });
+            const res = await axios.post("https://dark-pattern-api.onrender.com/analyze", { url });
 
             if (res.data.success || res.data.total_patterns_found !== undefined) {
                 setStatus(`Analysis Complete: Detected ${res.data.total_patterns_found || 0} patterns!`);

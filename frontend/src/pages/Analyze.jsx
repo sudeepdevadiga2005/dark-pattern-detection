@@ -18,7 +18,7 @@ const Analyze = () => {
     useEffect(() => {
         const fetchUserData = async () => {
             try {
-                const res = await axios.get('http://localhost:5000/dashboard');
+                const res = await axios.get('https://dark-pattern-api.onrender.com/dashboard');
                 setUser(res.data.user);
                 setFetching(false);
             } catch (err) {
@@ -44,7 +44,7 @@ const Analyze = () => {
             const endpoint = activeTab === 'url' ? '/analyze' : '/analyze-text';
             const payload = activeTab === 'url' ? { url: inputValue } : { text: inputValue };
 
-            const res = await axios.post(`http://localhost:5000${endpoint}`, payload);
+            const res = await axios.post(`https://dark-pattern-api.onrender.com${endpoint}`, payload);
             setResult(res.data);
         } catch (err) {
             alert("Analysis failed.");
@@ -55,7 +55,7 @@ const Analyze = () => {
 
     const handleLogout = async () => {
         try {
-            await axios.get('http://localhost:5000/logout');
+            await axios.get('https://dark-pattern-api.onrender.com/logout');
             window.location.href = '/login';
         } catch (err) {
             window.location.href = '/login';

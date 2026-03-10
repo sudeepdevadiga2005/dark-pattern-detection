@@ -9,7 +9,7 @@ const ClientHome = () => {
 
     const handleLogout = async () => {
         try {
-            await axios.get('http://localhost:5000/logout');
+            await axios.get('https://dark-pattern-api.onrender.com/logout');
             window.location.href = '/login';
         } catch (err) {
             window.location.href = '/login';

@@ -30,7 +30,7 @@ const Dashboard = () => {
     const fetchDashboardData = async () => {
         setFetching(true);
         try {
-            const res = await axios.get('http://localhost:5000/dashboard');
+            const res = await axios.get('https://dark-pattern-api.onrender.com/dashboard');
             const data = res.data.history || [];
             setUser(res.data.user);
             setHistory(data);
@@ -55,7 +55,7 @@ const Dashboard = () => {
 
     const handleLogout = async () => {
         try {
-            await axios.get('http://localhost:5000/logout');
+            await axios.get('https://dark-pattern-api.onrender.com/logout');
             window.location.href = '/login';
         } catch (err) {
             window.location.href = '/login';
