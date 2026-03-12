@@ -25,7 +25,9 @@ app.secret_key = os.getenv("SECRET_KEY", "default-secret-key-keep-it-safe")
 # Improved CORS for production deployment
 CORS(app, supports_credentials=True, origins=[
     "http://localhost:5173", 
+    "http://127.0.0.1:5173",
     "http://localhost:3000",
+    "http://127.0.0.1:3000",
     "https://dark-pattern-api-production.up.railway.app", # Replace with your actual Railway URL
     "https://dark-pattern-detection-production.up.railway.app"
 ], allow_headers=["Content-Type", "Authorization"])
@@ -33,7 +35,7 @@ CORS(app, supports_credentials=True, origins=[
 # Session Configuration
 app.config.update(
     SESSION_COOKIE_SAMESITE='Lax', 
-    SESSION_COOKIE_SECURE=True,    # Set to True for HTTPS in production
+    SESSION_COOKIE_SECURE=not app.debug,    # True only in production (HTTPS)
     SESSION_COOKIE_HTTPONLY=True,
     PERMANENT_SESSION_LIFETIME=datetime.timedelta(days=7)
 )
