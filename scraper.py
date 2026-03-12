@@ -13,6 +13,7 @@ from duckduckgo_search import DDGS
 from urllib.parse import urlparse
 import difflib
 import random
+import time
 
 # Modern User-Agents for rotation
 USER_AGENTS = [
@@ -33,7 +34,7 @@ VERIFIED_DOMAINS = [
     'wayfair', 'shein', 'ikea', 'bestbuy', 'homedepot', 'costco'
 ]
 
-import urllib3
+
 # Suppress insecure request warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -165,7 +166,7 @@ def get_web_intelligence(url, domain):
     """
     # 1. Quick check if it's a known official domain to avoid incorrect "limited record" msgs
     # Handle domain normalization (e.g. WaImart.com -> walmart)
-    normalized_for_check = domain.lower().replace('0', 'o').replace('1', 'l').replace('!', 'i').replace('i', 'l') 
+    normalized_for_check = domain.lower().replace('0', 'o').replace('1', 'l').replace('!', 'i')
     
     found_brand = None
     for brand in VERIFIED_DOMAINS:

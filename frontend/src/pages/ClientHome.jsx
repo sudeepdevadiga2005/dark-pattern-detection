@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
+import API_BASE_URL from '../config';
 import Cookies from 'js-cookie';
 import './ClientHome.css';
 
@@ -9,7 +10,7 @@ const ClientHome = () => {
 
     const handleLogout = async () => {
         try {
-            await axios.get('https://dark-pattern-api.onrender.com/logout');
+            await axios.get(`${API_BASE_URL}/logout`);
             window.location.href = '/login';
         } catch (err) {
             window.location.href = '/login';

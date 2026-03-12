@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import API_BASE_URL from '../config';
 import { Link, useLocation } from 'react-router-dom';
 import './Dashboard.css';
 
@@ -30,7 +31,7 @@ const Dashboard = () => {
     const fetchDashboardData = async () => {
         setFetching(true);
         try {
-            const res = await axios.get('https://dark-pattern-api.onrender.com/dashboard');
+            const res = await axios.get(`${API_BASE_URL}/dashboard`);
             const data = res.data.history || [];
             setUser(res.data.user);
             setHistory(data);
@@ -55,7 +56,7 @@ const Dashboard = () => {
 
     const handleLogout = async () => {
         try {
-            await axios.get('https://dark-pattern-api.onrender.com/logout');
+            await axios.get(`${API_BASE_URL}/logout`);
             window.location.href = '/login';
         } catch (err) {
             window.location.href = '/login';

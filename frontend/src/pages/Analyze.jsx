@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import API_BASE_URL from '../config';
 import { Link } from 'react-router-dom';
 import './Analyze.css';
 
@@ -18,7 +19,7 @@ const Analyze = () => {
     useEffect(() => {
         const fetchUserData = async () => {
             try {
-                const res = await axios.get('https://dark-pattern-api.onrender.com/dashboard');
+                const res = await axios.get(`${API_BASE_URL}/dashboard`);
                 setUser(res.data.user);
                 setFetching(false);
             } catch (err) {
@@ -44,7 +45,7 @@ const Analyze = () => {
             const endpoint = activeTab === 'url' ? '/analyze' : '/analyze-text';
             const payload = activeTab === 'url' ? { url: inputValue } : { text: inputValue };
 
-            const res = await axios.post(`https://dark-pattern-api.onrender.com${endpoint}`, payload);
+            const res = await axios.post(`${API_BASE_URL}${endpoint}`, payload);
             setResult(res.data);
         } catch (err) {
             alert("Analysis failed.");
@@ -55,7 +56,7 @@ const Analyze = () => {
 
     const handleLogout = async () => {
         try {
-            await axios.get('https://dark-pattern-api.onrender.com/logout');
+            await axios.get(`${API_BASE_URL}/logout`);
             window.location.href = '/login';
         } catch (err) {
             window.location.href = '/login';

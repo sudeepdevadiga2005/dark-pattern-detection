@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import axios from 'axios';
+import API_BASE_URL from '../config';
 import { Link } from 'react-router-dom';
 import './WebScraper.css';
 
@@ -23,7 +24,7 @@ const WebScraper = () => {
         setResults(null);
 
         try {
-            const res = await axios.post("https://dark-pattern-api.onrender.com/scrape-details", { url });
+            const res = await axios.post(`${API_BASE_URL}/scrape-details`, { url });
 
             if (res.data.success) {
                 setResults(res.data);
@@ -53,7 +54,7 @@ const WebScraper = () => {
         setResults(null);
 
         try {
-            const res = await axios.post("https://dark-pattern-api.onrender.com/analyze", { url });
+            const res = await axios.post(`${API_BASE_URL}/analyze`, { url });
 
             if (res.data.success || res.data.total_patterns_found !== undefined) {
                 setStatus(`Analysis Complete: Detected ${res.data.total_patterns_found || 0} patterns!`);

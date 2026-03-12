@@ -14,7 +14,7 @@ user_backups.csv
 
 # Ignore Local Test Outputs / Temporary files
 test_out.txt
-dataset (1).tsv
+# dataset (1).tsv
 test_ddgs.py
 test_domain_verifier.py
 test_native_ddg.py

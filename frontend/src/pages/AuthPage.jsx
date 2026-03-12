@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './Auth.css';
 import axios from 'axios';
+import API_BASE_URL from '../config';
 
 // Ensure cookies are sent with every request
 axios.defaults.withCredentials = true;
@@ -23,7 +24,7 @@ const AuthPage = () => {
     useEffect(() => {
         const checkLogin = async () => {
             try {
-                const res = await axios.get('https://dark-pattern-api.onrender.com/dashboard');
+                const res = await axios.get(`${API_BASE_URL}/dashboard`);
                 if (res.data.user) {
                     console.log("User already logged in, redirecting...");
                     window.location.href = window.location.origin + '/';
@@ -65,7 +66,7 @@ const AuthPage = () => {
         e.preventDefault();
         try {
             console.log("Attempting Login with:", loginData.email);
-            const res = await axios.post('https://dark-pattern-api.onrender.com/login', loginData);
+            const res = await axios.post(`${API_BASE_URL}/login`, loginData);
             console.log("Login Success:", res.data);
             if (res.data.success) {
                 window.location.href = window.location.origin + '/';
@@ -84,7 +85,7 @@ const AuthPage = () => {
             return;
         }
         try {
-            const res = await axios.post('https://dark-pattern-api.onrender.com/signup', signupData);
+            const res = await axios.post(`${API_BASE_URL}/signup`, signupData);
             if (res.data.success) {
                 alert('Registration complete! Please sign in.');
                 togglePanel(false);
@@ -97,7 +98,7 @@ const AuthPage = () => {
     const handleForgotRequest = async (e) => {
         e.preventDefault();
         try {
-            const res = await axios.post('https://dark-pattern-api.onrender.com/forgot-password', { email: forgotData.email });
+            const res = await axios.post(`${API_BASE_URL}/forgot-password`, { email: forgotData.email });
             if (res.data.success) {
                 setForgotPhase('otp');
                 setOtpTimer(120); // Reset timer to 120 seconds
@@ -111,7 +112,7 @@ const AuthPage = () => {
     const handleVerifyOtp = async (e) => {
         e.preventDefault();
         try {
-            const res = await axios.post('https://dark-pattern-api.onrender.com/verify-otp', {
+            const res = await axios.post(`${API_BASE_URL}/verify-otp`, {
                 email: forgotData.email,
                 otp: forgotData.otp
             });
@@ -135,7 +136,7 @@ const AuthPage = () => {
     const handleReset = async (e) => {
         e.preventDefault();
         try {
-            const res = await axios.post('https://dark-pattern-api.onrender.com/reset-password', {
+            const res = await axios.post(`${API_BASE_URL}/reset-password`, {
                 email: forgotData.email,
                 otp: forgotData.otp,
                 new_password: forgotData.new_password
