@@ -1,5 +1,5 @@
 const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-const API_BASE_URL = import.meta.env.VITE_API_URL || (isLocalhost ? "http://localhost:5000" : "https://web-production-caeac.up.railway.app"); 
+const API_BASE_URL = import.meta.env.VITE_API_URL || (isLocalhost ? "http://localhost:5000" : ""); 
 // Note: User should update VITE_API_URL in their environment or replace the default above.
 
 export default API_BASE_URL;
