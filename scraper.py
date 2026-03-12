@@ -166,6 +166,14 @@ def get_model():
         _model = load_model()
     return _model
 
+def force_retrain():
+    global _model
+    print("FORCING MODEL RETRAIN due to incompatibility...", flush=True)
+    if os.path.exists(model_path):
+        os.remove(model_path)
+    _model = train_and_save_model()
+    return _model
+
 def get_web_intelligence(url, domain):
     """
     Searches the internet for the domain's reputation, reviews, and official status.
@@ -323,20 +331,29 @@ def perform_prediction(visible_texts):
     # 1. ML Model Predictions
     model = get_model()
     if model:
-        predictions = model.predict(visible_texts)
-        probabilities = model.predict_proba(visible_texts)
-        class_to_idx = {cls: i for i, cls in enumerate(model.classes_)}
-        
-        for text, pred, proba in zip(visible_texts, predictions, probabilities):
-            if pred != 'Not Dark Pattern':
-                category = pred.title()
-                if category not in results:
-                    results[category] = []
-                
-                conf_score = proba[class_to_idx[pred]]
-                if text not in [f['text'] for f in results[category]]:
-                    results[category].append({'text': text, 'confidence': float(conf_score)})
-                    total_patterns += 1
+        try:
+            predictions = model.predict(visible_texts)
+            probabilities = model.predict_proba(visible_texts)
+            class_to_idx = {cls: i for i, cls in enumerate(model.classes_)}
+            
+            for text, pred, proba in zip(visible_texts, predictions, probabilities):
+                if pred != 'Not Dark Pattern':
+                    category = pred.title()
+                    if category not in results:
+                        results[category] = []
+                    
+                    conf_score = proba[class_to_idx[pred]]
+                    if text not in [f['text'] for f in results[category]]:
+                        results[category].append({'text': text, 'confidence': float(conf_score)})
+                        total_patterns += 1
+        except AttributeError as e:
+            if 'multi_class' in str(e):
+                print("Detected scikit-learn version mismatch. Retraining...", flush=True)
+                force_retrain()
+            else:
+                print(f"Prediction Error: {e}")
+        except Exception as e:
+            print(f"Prediction Error: {e}")
 
     # 2. Heuristic Scanner (Adds patterns found by keywords)
     for text in visible_texts:
