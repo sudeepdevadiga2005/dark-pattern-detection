@@ -40,16 +40,23 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=datetime.timedelta(days=7)
 )
 
-# MongoDB Setup
-try:
-    client = MongoClient(MONGO_URI)
-    db = client["dark-pattern-users"] 
-    users_col = db["users"]
-    analyses_col = db["analyses"]
-    client.admin.command('ping')
-    print("Database Connection: ONLINE (MongoDB Atlas)")
-except Exception as e:
-    print(f"DATABASE ERROR: {e}")
+# MongoDB Setup - Build Safe
+db = None
+users_col = None
+analyses_col = None
+
+if MONGO_URI:
+    try:
+        client = MongoClient(MONGO_URI)
+        db = client["dark-pattern-users"] 
+        users_col = db["users"]
+        analyses_col = db["analyses"]
+        client.admin.command('ping')
+        print("Database Connection: ONLINE (MongoDB Atlas)")
+    except Exception as e:
+        print(f"DATABASE ERROR: {e}")
+else:
+    print("DATABASE WARNING: MONGO_URI not found. Database features will be disabled until configured.")
 
 @app.before_request
 def log_session():
