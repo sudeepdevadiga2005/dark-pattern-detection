@@ -1,7 +1,7 @@
 import os
 import json
 import datetime
-from flask import Flask, request, jsonify, render_template, session, redirect, url_for, make_response
+from flask import Flask, request, jsonify, render_template, session, redirect, url_for, make_response, send_from_directory
 from flask_cors import CORS, cross_origin
 from scraper import analyze_url, analyze_text, fetch_with_rotation
 from functools import wraps
@@ -24,11 +24,13 @@ def get_model():
         _model = load_model()
     return _model
 
-# Load secret URI from .env
+# Load environment variables
 load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI")
 
-app = Flask(__name__)
+# Configure folders for serving React
+dist_folder = os.path.join(os.getcwd(), 'frontend', 'dist')
+app = Flask(__name__, static_folder=dist_folder, static_url_path='/')
 app.secret_key = os.getenv("APP_SESSION_KEY", "default-secret-key-keep-it-safe")
 
 # Improved CORS for production deployment
@@ -382,20 +384,14 @@ def ext_analyze():
         
     return jsonify(result)
 
-@app.route('/test-page')
-def test_page():
-    # Keep publicly accessible for local testing
-    html = """
-    <html><head><title>Mega Sale Shop</title></head>
-    <body style="background:#0f172a; color:white; font-family:sans-serif; padding:50px;">
-        <h1>Welcome to our store!</h1>
-        <p>Hurry up! This is a limited time offer that expires in 10 minutes. Time is running out!</p>
-        <p>Hurry, only 3 left in stock! Almost sold out due to high demand.</p>
-        <p>15 people are viewing this right now. This is your last chance!</p>
-        <button style="background:#3b82f6; color:white; padding:15px; border:none; border-radius:10px;">Buy Now</button>
-    </body></html>
-    """
-    return html
+# --- FRONTEND SERVING ---
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve(path):
+    if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
+        return send_from_directory(app.static_folder, path)
+    else:
+        return send_from_directory(app.static_folder, 'index.html')
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
