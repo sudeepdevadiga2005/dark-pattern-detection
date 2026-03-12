@@ -15,12 +15,21 @@ import ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+# Model will be loaded lazily during first prediction
+_model = None
+
+def get_model():
+    global _model
+    if _model is None:
+        _model = load_model()
+    return _model
+
 # Load secret URI from .env
 load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI")
 
 app = Flask(__name__)
-app.secret_key = os.getenv("SECRET_KEY", "default-secret-key-keep-it-safe")
+app.secret_key = os.getenv("APP_SESSION_KEY", "default-secret-key-keep-it-safe")
 
 # Improved CORS for production deployment
 CORS(app, supports_credentials=True, origins=[

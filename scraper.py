@@ -157,8 +157,14 @@ def load_model():
     else:
         return train_and_save_model()
 
-# Load model once at startup
-model = load_model()
+# Model will be loaded lazily during first prediction
+_model = None
+
+def get_model():
+    global _model
+    if _model is None:
+        _model = load_model()
+    return _model
 
 def get_web_intelligence(url, domain):
     """
@@ -315,6 +321,7 @@ def perform_prediction(visible_texts):
     ]
     
     # 1. ML Model Predictions
+    model = get_model()
     if model:
         predictions = model.predict(visible_texts)
         probabilities = model.predict_proba(visible_texts)
