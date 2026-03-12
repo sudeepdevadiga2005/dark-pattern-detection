@@ -93,7 +93,7 @@ def fetch_with_rotation(url):
 
 # Paths
 base_dir = os.path.dirname(os.path.abspath(__file__))
-dataset_path_tsv = os.path.join(base_dir, 'dataset (1).tsv')
+dataset_path_tsv = os.path.join(base_dir, 'training_data.tsv')
 dataset_path_csv = os.path.join(base_dir, 'pattern_classifications.csv')
 model_path = os.path.join(base_dir, 'dark_pattern_model.pkl')
 
@@ -157,7 +157,7 @@ def load_model():
     else:
         return train_and_save_model()
 
-# Model will be loaded lazily during first prediction
+# Model handling - Build Safe and Self-Healing
 _model = None
 
 def get_model():
@@ -170,7 +170,10 @@ def force_retrain():
     global _model
     print("FORCING MODEL RETRAIN due to incompatibility...", flush=True)
     if os.path.exists(model_path):
-        os.remove(model_path)
+        try:
+            os.remove(model_path)
+        except:
+            pass
     _model = train_and_save_model()
     return _model
 
@@ -329,8 +332,11 @@ def perform_prediction(visible_texts):
     ]
     
     # 1. ML Model Predictions
-    model = get_model()
-    if model:
+    for attempt in range(2): # 2 attempts: First might fail and trigger retrain
+        model = get_model()
+        if not model:
+            break
+            
         try:
             predictions = model.predict(visible_texts)
             probabilities = model.predict_proba(visible_texts)
@@ -346,14 +352,21 @@ def perform_prediction(visible_texts):
                     if text not in [f['text'] for f in results[category]]:
                         results[category].append({'text': text, 'confidence': float(conf_score)})
                         total_patterns += 1
+            break # Success, exit retry loop
+            
         except AttributeError as e:
-            if 'multi_class' in str(e):
-                print("Detected scikit-learn version mismatch. Retraining...", flush=True)
+            if 'multi_class' in str(e) and attempt == 0:
+                print("Detected scikit-learn version mismatch. Retraining and retrying...", flush=True)
                 force_retrain()
-            else:
-                print(f"Prediction Error: {e}")
+                # Clear any partial results from first failed attempt
+                results = {}
+                total_patterns = 0
+                continue 
+            print(f"Prediction Error (AttributeError): {e}")
+            break
         except Exception as e:
-            print(f"Prediction Error: {e}")
+            print(f"Prediction Error (Generic): {e}")
+            break
 
     # 2. Heuristic Scanner (Adds patterns found by keywords)
     for text in visible_texts:
