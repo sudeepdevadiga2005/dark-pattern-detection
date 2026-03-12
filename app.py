@@ -279,9 +279,7 @@ def log_analysis(user, data):
     except Exception as e:
         print(f"Error logging to MongoDB: {e}")
 
-@app.route('/')
-def home():
-    return jsonify({'message': 'Dark Pattern Detection API is Running', 'version': '2.0.0-react'})
+
 
 @app.route('/dashboard')
 @login_required
