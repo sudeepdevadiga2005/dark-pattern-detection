@@ -60,7 +60,7 @@ def fetch_with_rotation(url):
     proxies_list = get_free_proxies()
     # Try direct first, then try with random identities
     attempts = 0
-    max_attempts = 5
+    max_attempts = 3
     
     while attempts < max_attempts:
         current_ua = random.choice(USER_AGENTS)
@@ -74,7 +74,7 @@ def fetch_with_rotation(url):
         
         try:
             proxy_dict = {"http": current_proxy, "https": current_proxy} if current_proxy else None
-            response = requests.get(url, headers=headers, proxies=proxy_dict, timeout=10, verify=False)
+            response = requests.get(url, headers=headers, proxies=proxy_dict, timeout=7, verify=False)
             
             if response.status_code == 200:
                 print(f"Fetch Successful using: {current_proxy if current_proxy else 'Direct IP'}")
