@@ -4,17 +4,60 @@ import API_BASE_URL from '../config';
 import { Link } from 'react-router-dom';
 import './Analyze.css';
 
+// Device Detection Utility
+function detectDeviceType() {
+    const ua = navigator.userAgent.toLowerCase();
+    if (/iphone|ipod|android.*mobile|windows phone|blackberry/i.test(ua)) return 'mobile';
+    if (/ipad|android(?!.*mobile)|tablet/i.test(ua)) return 'tablet';
+    if (/macintosh|windows|linux/i.test(ua) && window.innerWidth <= 1024) return 'tablet';
+    return 'desktop';
+}
+
+function getLayoutFromWidth(w) {
+    if (w <= 768) return 'mobile';
+    if (w <= 1024) return 'tablet';
+    return 'desktop';
+}
+
 const Analyze = () => {
-    const [activeTab, setActiveTab] = useState('url'); // 'url' or 'text'
+    const [activeTab, setActiveTab] = useState('url');
     const [inputValue, setInputValue] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [result, setResult] = useState(null);
     const [user, setUser] = useState('');
     const [fetching, setFetching] = useState(true);
     const [error, setError] = useState('');
+    const [deviceInfo, setDeviceInfo] = useState({ type: 'desktop', layout: 'desktop' });
 
-    // Ensure cookies are sent with every request
     axios.defaults.withCredentials = true;
+
+    // Detect device and send to backend on mount + window resize
+    useEffect(() => {
+        const sendDeviceInfo = async () => {
+            const type = detectDeviceType();
+            const width = window.innerWidth;
+            const layout = getLayoutFromWidth(width);
+            setDeviceInfo({ type, layout });
+
+            try {
+                await axios.post(`${API_BASE_URL}/detect-device`, {
+                    device_type: type,
+                    screen_width: width
+                });
+            } catch (e) {
+                console.log('Device detection API unavailable');
+            }
+        };
+
+        sendDeviceInfo();
+
+        const handleResize = () => {
+            const layout = getLayoutFromWidth(window.innerWidth);
+            setDeviceInfo(prev => ({ ...prev, layout }));
+        };
+        window.addEventListener('resize', handleResize);
+        return () => window.removeEventListener('resize', handleResize);
+    }, []);
 
     useEffect(() => {
         const fetchUserData = async () => {
@@ -68,8 +111,11 @@ const Analyze = () => {
         return <div className="loading-screen">{error || "Loading Aegis: The Dark-Pattern Detector..."}</div>;
     }
 
+    const isMobile = deviceInfo.layout === 'mobile';
+    const isTablet = deviceInfo.layout === 'tablet';
+
     return (
-        <div className="analyze-wrapper">
+        <div className={`analyze-wrapper layout-${deviceInfo.layout}`}>
             <div className="bg-canvas">
                 <div className="orb orb-1"></div>
                 <div className="orb orb-2"></div>
@@ -77,17 +123,22 @@ const Analyze = () => {
 
             <nav className="dash-nav">
                 <div className="brand">
-                    <Link to="/" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '15px' }}>
+                    <Link to="/" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: isMobile ? '8px' : '15px' }}>
                         <div className="brand-mark">D</div>
-                        <span className="brand-name">Aegis: The Dark-Pattern Detector</span>
+                        {!isMobile && <span className="brand-name">Aegis: The Dark-Pattern Detector</span>}
                     </Link>
                 </div>
                 <div className="user-profile">
-                    <Link to="/dashboard" className="nav-link-item">My History</Link>
-                    <span className="user-name">Welcome, {user}</span>
-                    <button className="btn-logout" onClick={handleLogout}>Logout</button>
+                    {!isMobile && <Link to="/dashboard" className="nav-link-item">My History</Link>}
+                    <span className="user-name">{isMobile ? user : `Welcome, ${user}`}</span>
+                    <button className="btn-logout" onClick={handleLogout}>{isMobile ? '⏻' : 'Logout'}</button>
                 </div>
             </nav>
+
+            {/* Device info badge */}
+            <div className="device-badge">
+                {deviceInfo.type === 'mobile' ? '📱' : deviceInfo.type === 'tablet' ? '📟' : '💻'} {deviceInfo.layout.toUpperCase()} VIEW
+            </div>
 
             <main className="analyze-main">
                 <div className="analyzer-card">
@@ -108,7 +159,7 @@ const Analyze = () => {
                             <div className="input-group">
                                 <input
                                     type="text"
-                                    placeholder="Enter website URL (e.g. amazon.in)"
+                                    placeholder={isMobile ? "Enter URL..." : "Enter website URL (e.g. amazon.in)"}
                                     value={inputValue}
                                     onChange={(e) => setInputValue(e.target.value)}
                                     required
@@ -127,9 +178,13 @@ const Analyze = () => {
                             </div>
                         )}
                         <button className={`btn-analyze ${isLoading ? 'loading' : ''}`} type="submit" disabled={isLoading}>
-                            {isLoading ? 'Scanning Patterns...' : 'Run Deep Scan →'}
+                            {isLoading ? 'Scanning Patterns...' : (isMobile ? 'Analyze →' : 'Run Deep Scan →')}
                         </button>
                     </form>
+
+                    {isMobile && (
+                        <Link to="/dashboard" className="mobile-history-link">📊 View Scan History</Link>
+                    )}
                 </div>
 
                 {result && (
@@ -162,7 +217,7 @@ const Analyze = () => {
 
                                 {result.web_intelligence && (
                                     <div className="intelligence-box">
-                                        <div className="intel-label">Aegis: The Dark-Pattern Detector Intelligence</div>
+                                        <div className="intel-label">Aegis Intelligence</div>
                                         <p>{result.web_intelligence}</p>
                                     </div>
                                 )}

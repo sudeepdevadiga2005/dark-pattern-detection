@@ -277,6 +277,42 @@ def log_analysis(user, data):
 
 
 
+@app.route('/api/detect-device', methods=['POST', 'GET'])
+def detect_device():
+    if request.method == 'POST':
+        data = request.get_json() or {}
+        device_type = data.get('device_type', 'unknown')
+        screen_width = data.get('screen_width', 0)
+    else:
+        # Fallback: detect from User-Agent header
+        ua = request.headers.get('User-Agent', '').lower()
+        screen_width = 0
+        if any(m in ua for m in ['iphone', 'android', 'mobile']):
+            device_type = 'mobile'
+        elif any(t in ua for t in ['ipad', 'tablet']):
+            device_type = 'tablet'
+        else:
+            device_type = 'desktop'
+
+    # Determine recommended layout
+    if screen_width > 0:
+        if screen_width <= 768:
+            layout = 'mobile'
+        elif screen_width <= 1024:
+            layout = 'tablet'
+        else:
+            layout = 'desktop'
+    else:
+        layout = device_type
+
+    return jsonify({
+        'success': True,
+        'device_type': device_type,
+        'screen_width': screen_width,
+        'recommended_layout': layout,
+        'message': f'Device detected as {device_type}. Serving {layout} layout.'
+    })
+
 @app.route('/api/health')
 def health():
     return jsonify({'status': 'ONLINE', 'database': 'CONNECTED' if db else 'OFFLINE'})
