@@ -263,6 +263,10 @@ def logout():
     return response
 
 def log_analysis(user, data):
+    if not analyses_col:
+        print(f"DATABASE WARNING: Skipping log for {user} (analyses_col is None)")
+        return
+
     analysis_entry = {
         'username': user,
         'timestamp': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -271,7 +275,7 @@ def log_analysis(user, data):
         'trust_score': data.get('trust_score'),
         'safety_status': data.get('safety_status'),
         'total_patterns_found': data.get('total_patterns_found'),
-        'findings': data.get('findings') # Store full findings in MongoDB
+        'findings': data.get('findings')
     }
     try:
         analyses_col.insert_one(analysis_entry)
@@ -390,12 +394,15 @@ def ext_analyze():
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve(path):
-    # If the request is for an actual file in the dist folder (like an image or .js file)
+    # Skip any paths that start with 'api/' to avoid route conflicts
+    if path.startswith('api/'):
+        return jsonify({'success': False, 'error': 'API Route Not Found'}), 404
+        
+    # If the request is for an actual file (image, js, css)
     if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
         return send_from_directory(app.static_folder, path)
-    # Otherwise, always serve the React index.html (handles /login, /analyze, etc.)
-    else:
-        return send_from_directory(app.static_folder, 'index.html')
+    # Otherwise serve index.html for React Router
+    return send_from_directory(app.static_folder, 'index.html')
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

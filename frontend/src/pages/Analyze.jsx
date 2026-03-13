@@ -48,7 +48,8 @@ const Analyze = () => {
             const res = await axios.post(`${API_BASE_URL}${endpoint}`, payload);
             setResult(res.data);
         } catch (err) {
-            alert("Analysis failed.");
+            const errorMsg = err.response?.data?.error || "Analysis failed. The server might be busy or the model is retraining. Please try again in 10 seconds.";
+            alert(errorMsg);
         } finally {
             setIsLoading(false);
         }
