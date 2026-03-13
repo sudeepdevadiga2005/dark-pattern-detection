@@ -263,7 +263,7 @@ def logout():
     return response
 
 def log_analysis(user, data):
-    if not analyses_col:
+    if analyses_col is None:
         print(f"DATABASE WARNING: Skipping log for {user} (analyses_col is None)")
         return
 
