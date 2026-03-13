@@ -15,14 +15,6 @@ import ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-# Model will be loaded lazily during first prediction
-_model = None
-
-def get_model():
-    global _model
-    if _model is None:
-        _model = load_model()
-    return _model
 
 # Load environment variables
 load_dotenv()
@@ -407,4 +399,4 @@ def serve(path):
     return send_from_directory(app.static_folder, 'index.html')
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    app.run(debug=False, port=5000)

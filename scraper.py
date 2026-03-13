@@ -157,7 +157,7 @@ def load_model():
     else:
         return train_and_save_model()
 
-# Model handling - Build Safe and Self-Healing
+# Model handling - Eager Loading at Startup
 _model = None
 
 def get_model():
@@ -176,6 +176,14 @@ def force_retrain():
             pass
     _model = train_and_save_model()
     return _model
+
+# Load model NOW at startup so it's ready before any request arrives
+print("Loading ML model at startup...", flush=True)
+_model = load_model()
+if _model:
+    print("ML Model: READY", flush=True)
+else:
+    print("ML Model: FAILED TO LOAD (will retry on first request)", flush=True)
 
 def get_web_intelligence(url, domain):
     """
