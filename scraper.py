@@ -31,7 +31,13 @@ VERIFIED_DOMAINS = [
     'apple', 'google', 'microsoft', 'netflix', 'facebook', 'instagram', 
     'twitter', 'linkedin', 'github', 'shopclues', 'myntra', 'ajio', 'meesho',
     'snapdeal', 'zomato', 'swiggy', 'bigbasket', 'nykaa', 'jio', 'reliance',
-    'wayfair', 'shein', 'ikea', 'bestbuy', 'homedepot', 'costco'
+    'wayfair', 'shein', 'ikea', 'bestbuy', 'homedepot', 'costco',
+    'blinkit', 'zepto', 'dunzo', 'phonepe', 'paytm', 'razorpay', 'cred',
+    'ola', 'uber', 'makemytrip', 'goibibo', 'cleartrip', 'yatra',
+    'bookmyshow', 'hotstar', 'spotify', 'youtube', 'whatsapp', 'telegram',
+    'samsung', 'oneplus', 'realme', 'xiaomi', 'boat', 'noise',
+    'puma', 'nike', 'adidas', 'decathlon', 'lenskart', 'mamaearth',
+    'paypal', 'stripe', 'shopify', 'etsy', 'wish', 'noon'
 ]
 
 
@@ -188,9 +194,9 @@ else:
 def get_web_intelligence(url, domain):
     """
     Searches the internet for the domain's reputation, reviews, and official status.
+    Uses DuckDuckGo to find real reviews and determine if the site is legitimate.
     """
     # 1. Quick check if it's a known official domain to avoid incorrect "limited record" msgs
-    # Handle domain normalization (e.g. WaImart.com -> walmart)
     normalized_for_check = domain.lower().replace('0', 'o').replace('1', 'l').replace('!', 'i')
     
     found_brand = None
@@ -207,9 +213,37 @@ def get_web_intelligence(url, domain):
             'is_verified_business': True,
             'search_snippets': []
         }
+    
+    # 2. Check if this domain looks like a MODIFIED COPY of a known brand
+    # e.g., blinkittt.com -> blinkit, amazzon.com -> amazon
+    sld = domain.split('.')[0] if '.' in domain else domain
+    norm_sld = re.sub(r'(.)\1+', r'\1', sld)  # Remove repeated chars
+    chars_map = str.maketrans('01!534v8', 'oliiseua')
+    norm_sld = norm_sld.translate(chars_map)
+    
+    looks_like_copy = None
+    for brand in VERIFIED_DOMAINS:
+        similarity = difflib.SequenceMatcher(None, brand, norm_sld).ratio()
+        if norm_sld == brand and sld != brand:
+            # Exact match after normalization but original is different (e.g., blinkittt -> blinkit)
+            looks_like_copy = brand
+            break
+        elif similarity >= 0.85 and sld != brand:
+            looks_like_copy = brand
+            break
 
+    if looks_like_copy:
+        return {
+            'reputation_score': 10,
+            'summary': f"WARNING: This domain '{domain}' appears to be a modified copy of the official brand '{looks_like_copy}.com'. The extra or changed characters are a common phishing tactic.",
+            'is_verified_business': False,
+            'is_likely_copy': True,
+            'search_snippets': []
+        }
+
+    # 3. Search the internet for reviews and reputation
     intelligence = {
-        'reputation_score': 50,
+        'reputation_score': 30,  # Start cautious for unknown sites
         'summary': f"Limited public records for {domain}. Caution is advised as it isn't a widely recognized platform.",
         'is_verified_business': False,
         'search_snippets': []
@@ -217,33 +251,45 @@ def get_web_intelligence(url, domain):
     
     try:
         with DDGS() as ddgs:
-            # Search query for reputation
             query = f"{domain} reviews official or scam"
             results = list(ddgs.text(query, max_results=5))
             
             scam_mentions = 0
             trust_mentions = 0
+            no_results = len(results) == 0
             
             for r in results:
                 text = (r['title'] + " " + r['body']).lower()
                 intelligence['search_snippets'].append(r['title'])
                 
-                if any(word in text for word in ['scam', 'fake', 'fraud', 'dangerous', 'not official', 'copy']):
+                if any(word in text for word in ['scam', 'fake', 'fraud', 'dangerous', 'not official', 'copy', 'phishing', 'malware']):
                     scam_mentions += 1
-                if any(word in text for word in ['legit', 'official', 'verified', 'safe', 'trusted']):
+                if any(word in text for word in ['legit', 'official', 'verified', 'safe', 'trusted', 'established', 'reliable']):
                     trust_mentions += 1
             
-            if scam_mentions > trust_mentions:
+            if no_results:
+                # No search results at all = very suspicious (site probably doesn't exist or is brand new)
+                intelligence['reputation_score'] = 15
+                intelligence['summary'] = f"No public information found for '{domain}'. This domain has zero online presence, which is a major red flag."
+            elif scam_mentions > trust_mentions:
                 intelligence['reputation_score'] = 20
-                intelligence['summary'] = "Internet search suggests this might be a SCAM or a COPY of a real site. Multiple sources mention risk."
-            elif trust_mentions > 2:
+                intelligence['summary'] = f"Internet search suggests '{domain}' might be a SCAM or a COPY of a real site. Multiple sources mention risk."
+            elif scam_mentions > 0 and scam_mentions == trust_mentions:
+                intelligence['reputation_score'] = 40
+                intelligence['summary'] = f"Mixed reviews found for '{domain}'. Some sources flag concerns. Proceed with caution."
+            elif trust_mentions >= 3:
                 intelligence['reputation_score'] = 90
                 intelligence['is_verified_business'] = True
-                intelligence['summary'] = "Verified business records and positive user reviews found online."
+                intelligence['summary'] = f"Verified business records and positive user reviews found online for '{domain}'."
+            elif trust_mentions >= 1:
+                intelligence['reputation_score'] = 65
+                intelligence['summary'] = f"Some positive mentions found for '{domain}', but not enough to fully verify. Use caution."
+            # else: stays at default 30 (limited records)
                 
     except Exception as e:
         print(f"Intelligence Gather Error: {e}")
         intelligence['summary'] = "Reputation check temporarily unavailable."
+        intelligence['reputation_score'] = 40
         
     return intelligence
 
@@ -621,10 +667,21 @@ def analyze_url(url):
         # Perform Pattern Analysis
         findings_dict, total_patterns = perform_prediction(visible_texts)
         
-        # Calculate Trust Score
+        # Calculate Trust Score (Factor in web intelligence)
         trust_score = 100
         if is_suspicious: 
-            trust_score = 10 # Start very low for suspicious copies
+            trust_score = 10
+        
+        # If web intelligence says the site is not well-known, cap the trust score
+        rep_score = web_intel.get('reputation_score', 50)
+        if web_intel.get('is_likely_copy'):
+            trust_score = 5
+            is_suspicious = True
+            warning = web_intel['summary']
+        elif rep_score < 30:
+            trust_score = min(trust_score, 35)  # Unknown/suspicious sites can't be 100% safe
+        elif rep_score < 60:
+            trust_score = min(trust_score, 65)  # Partially known sites capped at 65
         
         trust_score -= (len(findings_dict) * 8)
         trust_score -= (total_patterns * 1.5)
