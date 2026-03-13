@@ -301,6 +301,9 @@ def is_url_suspicious(url):
     try:
         parsed = urlparse(url)
         domain = parsed.netloc.lower()
+        # Strip port number (e.g., zomato.com:443 -> zomato.com)
+        if ':' in domain:
+            domain = domain.split(':')[0]
         if domain.startswith('www.'):
             domain = domain[4:]
             
