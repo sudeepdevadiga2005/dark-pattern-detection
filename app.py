@@ -29,8 +29,8 @@ load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI")
 
 # Configure folders for serving React
-dist_folder = os.path.join(os.getcwd(), 'frontend', 'dist')
-app = Flask(__name__, static_folder=dist_folder, static_url_path='/')
+dist_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'frontend', 'dist')
+app = Flask(__name__, static_folder=dist_folder)
 app.secret_key = os.getenv("APP_SESSION_KEY", "default-secret-key-keep-it-safe")
 
 # Broad CORS for production stability
@@ -390,8 +390,10 @@ def ext_analyze():
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve(path):
+    # If the request is for an actual file in the dist folder (like an image or .js file)
     if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
         return send_from_directory(app.static_folder, path)
+    # Otherwise, always serve the React index.html (handles /login, /analyze, etc.)
     else:
         return send_from_directory(app.static_folder, 'index.html')
 
