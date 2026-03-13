@@ -33,20 +33,20 @@ dist_folder = os.path.join(os.getcwd(), 'frontend', 'dist')
 app = Flask(__name__, static_folder=dist_folder, static_url_path='/')
 app.secret_key = os.getenv("APP_SESSION_KEY", "default-secret-key-keep-it-safe")
 
-# Improved CORS for production deployment
+# Broad CORS for production stability
 CORS(app, supports_credentials=True, origins=[
     "http://localhost:5173", 
     "http://127.0.0.1:5173",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "https://dark-pattern-api-production.up.railway.app", # Replace with your actual Railway URL
-    "https://dark-pattern-detection-production.up.railway.app"
-], allow_headers=["Content-Type", "Authorization"])
+    "https://web-production-caeac.up.railway.app",
+    "http://web-production-caeac.up.railway.app"
+])
 
 # Session Configuration
 app.config.update(
     SESSION_COOKIE_SAMESITE='Lax', 
-    SESSION_COOKIE_SECURE=not app.debug,    # True only in production (HTTPS)
+    SESSION_COOKIE_SECURE=True,    # Enforce HTTPS on Railway
     SESSION_COOKIE_HTTPONLY=True,
     PERMANENT_SESSION_LIFETIME=datetime.timedelta(days=7)
 )
@@ -84,7 +84,7 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-@app.route('/signup', methods=['GET', 'POST'])
+@app.route('/api/signup', methods=['GET', 'POST'])
 def signup():
     if request.method == 'POST':
         data = request.get_json()
@@ -132,7 +132,7 @@ def signup():
         return jsonify({'success': True, 'message': 'User created successfully'})
     return jsonify({'message': 'Signup API is active. Use POST to register.'})
 
-@app.route('/login', methods=['GET', 'POST'])
+@app.route('/api/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         data = request.get_json()
@@ -155,7 +155,7 @@ def make_cookie_response(data):
 # OTP STORAGE (In-memory for simplicity, or use a dedicated collection)
 otps = {} 
 
-@app.route('/forgot-password', methods=['POST'])
+@app.route('/api/forgot-password', methods=['POST'])
 def forgot_password():
     data = request.get_json()
     email = data.get('email', '').strip()
@@ -196,7 +196,7 @@ def forgot_password():
         print(f"DEBUG: OTP for {email} is {otp}")
         return jsonify({'success': True, 'message': 'OTP generated (Email not configured, check console)', 'debug_otp': otp})
 
-@app.route('/verify-otp', methods=['POST'])
+@app.route('/api/verify-otp', methods=['POST'])
 def verify_otp():
     data = request.get_json()
     email = data.get('email')
@@ -224,7 +224,7 @@ def verify_otp():
         
     return jsonify({'success': True, 'message': 'OTP verified'})
 
-@app.route('/reset-password', methods=['POST'])
+@app.route('/api/reset-password', methods=['POST'])
 def reset_password():
     data = request.get_json()
     email = data.get('email')
@@ -255,7 +255,7 @@ def reset_password():
     del otps[email] # Clear OTP after use
     return jsonify({'success': True, 'message': 'Password reset successfully'})
 
-@app.route('/logout')
+@app.route('/api/logout')
 def logout():
     session.pop('user', None)
     response = make_cookie_response({'success': True, 'message': 'Logged out successfully'})
@@ -281,7 +281,11 @@ def log_analysis(user, data):
 
 
 
-@app.route('/dashboard')
+@app.route('/api/health')
+def health():
+    return jsonify({'status': 'ONLINE', 'database': 'CONNECTED' if db else 'OFFLINE'})
+
+@app.route('/api/dashboard')
 @login_required
 def dashboard():
     username = session.get('user')
@@ -292,7 +296,7 @@ def dashboard():
         item['_id'] = str(item['_id'])
     return jsonify({'user': username, 'history': history})
 
-@app.route('/get-history')
+@app.route('/api/get-history')
 @login_required
 def get_history():
     username = session.get('user')
@@ -301,14 +305,14 @@ def get_history():
         item['_id'] = str(item['_id'])
     return jsonify(history)
 
-@app.route('/clear-history', methods=['POST'])
+@app.route('/api/clear-history', methods=['POST'])
 @login_required
 def clear_user_history():
     username = session.get('user')
     analyses_col.delete_many({'username': username})
     return jsonify({'success': True})
 
-@app.route('/analyze-text', methods=['POST'])
+@app.route('/api/analyze-text', methods=['POST'])
 @login_required
 def analyze_t():
     data = request.get_json()
@@ -320,7 +324,7 @@ def analyze_t():
         log_analysis(session['user'], result)
     return jsonify(result)
 
-@app.route('/analyze', methods=['POST'])
+@app.route('/api/analyze', methods=['POST'])
 @login_required
 def analyze():
     data = request.get_json()
@@ -332,7 +336,7 @@ def analyze():
         log_analysis(session['user'], result)
     return jsonify(result)
 
-@app.route('/scrape-details', methods=['POST'])
+@app.route('/api/scrape-details', methods=['POST'])
 @login_required
 def scrape_details():
     from bs4 import BeautifulSoup
@@ -365,7 +369,7 @@ def scrape_details():
         'words': words
     })
 
-@app.route('/ext-analyze', methods=['POST'])
+@app.route('/api/ext-analyze', methods=['POST'])
 @cross_origin()
 def ext_analyze():
     data = request.get_json()

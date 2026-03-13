@@ -1,0 +1,1137 @@
+import os
+import json
+import datetime
+from flask import Flask, request, jsonify, render_template, session, redirect, url_for, make_response, send_from_directory
+from flask_cors import CORS, cross_origin
+from scraper import analyze_url, analyze_text, fetch_with_rotation
+from functools import wraps
+from werkzeug.security import generate_password_hash, check_password_hash
+from pymongo import MongoClient
+from dotenv import load_dotenv
+import random
+import time
+import smtplib
+import ssl
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+# Model will be loaded lazily during first prediction
+_model = None
+
+def get_model():
+    global _model
+    if _model is None:
+        _model = load_model()
+    return _model
+
+# Load environment variables
+load_dotenv()
+MONGO_URI = os.getenv("MONGO_URI")
+
+# Configure folders for serving React
+dist_folder = os.path.join(os.getcwd(), 'frontend', 'dist')
+app = Flask(__name__, static_folder=dist_folder, static_url_path='/')
+app.secret_key = os.getenv("APP_SESSION_KEY", "default-secret-key-keep-it-safe")
+
+# Improved CORS for production deployment
+CORS(app, supports_credentials=True, origins=[
+    "http://localhost:5173", 
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://dark-pattern-api-production.up.railway.app", # Replace with your actual Railway URL
+    "https://dark-pattern-detection-production.up.railway.app"
+], allow_headers=["Content-Type", "Authorization"])
+
+# Session Configuration
+app.config.update(
+    SESSION_COOKIE_SAMESITE='Lax', 
+    SESSION_COOKIE_SECURE=not app.debug,    # True only in production (HTTPS)
+    SESSION_COOKIE_HTTPONLY=True,
+    PERMANENT_SESSION_LIFETIME=datetime.timedelta(days=7)
+)
+
+# MongoDB Setup - Build Safe
+db = None
+users_col = None
+analyses_col = None
+
+if MONGO_URI:
+    try:
+        client = MongoClient(MONGO_URI)
+        db = client["dark-pattern-users"] 
+        users_col = db["users"]
+        analyses_col = db["analyses"]
+        client.admin.command('ping')
+        print("Database Connection: ONLINE (MongoDB Atlas)")
+    except Exception as e:
+        print(f"DATABASE ERROR: {e}")
+else:
+    print("DATABASE WARNING: MONGO_URI not found. Database features will be disabled until configured.")
+
+@app.before_request
+def log_session():
+    # Helpful for debugging why login might "not work"
+    print(f"--- Request: {request.method} {request.path} ---")
+    print(f"Session State: {'LOGGED IN as ' + session['user'] if 'user' in session else 'GUEST'}")
+    print(f"Origin: {request.headers.get('Origin')}")
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user' not in session:
+            return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
+@app.route('/signup', methods=['GET', 'POST'])
+def signup():
+    if request.method == 'POST':
+        data = request.get_json()
+        username = data.get('username')
+        email = data.get('email')
+        password = data.get('password')
+        confirm_password = data.get('confirm_password')
+        
+        # Use the existing SECRET_KEY from app config as the super_key for MongoDB
+        super_key = app.secret_key
+        
+        if not all([username, email, password, confirm_password]):
+            return jsonify({'success': False, 'message': 'All fields are required'}), 400
+            
+        if password != confirm_password:
+            return jsonify({'success': False, 'message': 'Passwords do not match'}), 400
+
+        if users_col.find_one({'$or': [{'username': username}, {'email': email}]}):
+            return jsonify({'success': False, 'message': 'Username or Email already exists'}), 400
+            
+        hashed_password = generate_password_hash(password)
+        
+        # Save to MongoDB: Includes the super_key (which is the SECRET_KEY)
+        users_col.insert_one({
+            'username': username, 
+            'email': email,
+            'password': hashed_password,
+            'super_key': super_key, 
+            'created_at': datetime.datetime.now()
+        })
+        
+        # Create CSV file backup: username, email, and RAW password. No super_key.
+        try:
+            timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            csv_file = "user_backups.csv"
+            file_exists = os.path.isfile(csv_file)
+            with open(csv_file, "a", encoding='utf-8') as f:
+                if not file_exists:
+                    f.write("Timestamp,Username,Email,Password\n")
+                # Escaping commas by wrapping in quotes for basic CSV safety
+                f.write(f'"{timestamp}","{username}","{email}","{password}"\n')
+        except Exception as e:
+            print(f"BACKUP ERROR: {e}")
+
+        return jsonify({'success': True, 'message': 'User created successfully'})
+    return jsonify({'message': 'Signup API is active. Use POST to register.'})
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        data = request.get_json()
+        email = data.get('email')
+        password = data.get('password')
+        
+        user = users_col.find_one({'email': email})
+        if user and check_password_hash(user['password'], password):
+            session['user'] = user['username']
+            response = make_cookie_response({'success': True, 'user': user['username']})
+            response.set_cookie('user', user['username'], max_age=3600*24, samesite='Lax') # 1 day
+            return response
+        return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
+    return jsonify({'message': 'Login API is active. Use POST to authenticate.'})
+
+def make_cookie_response(data):
+    from flask import make_response
+    return make_response(jsonify(data))
+
+# OTP STORAGE (In-memory for simplicity, or use a dedicated collection)
+otps = {} 
+
+@app.route('/forgot-password', methods=['POST'])
+def forgot_password():
+    data = request.get_json()
+    email = data.get('email', '').strip()
+    user = users_col.find_one({'email': email})
+    
+    if not user:
+        return jsonify({'success': False, 'message': 'Email not found'}), 404
+        
+    otp = "".join([str(random.randint(0, 9)) for _ in range(6)])
+    expiry = time.time() + 120 # 2 minutes expiry
+    
+    otps[email] = {'otp': otp, 'expiry': expiry, 'attempts': 0}
+    
+    # Try sending email
+    smtp_email = os.getenv("SMTP_EMAIL")
+    smtp_password = os.getenv("SMTP_APP_PASSWORD")
+    
+    if smtp_email and smtp_password and smtp_email != 'your_email@gmail.com':
+        try:
+            msg = MIMEMultipart()
+            msg['From'] = f"Dark Pattern Detection <{smtp_email}>"
+            msg['To'] = email
+            msg['Subject'] = 'Your OTP Verification Code'
+            body = f'Your one-time password (OTP) is: {otp}. Do not share this code.\n\nIt expires in 120 seconds.'
+            msg.attach(MIMEText(body, 'plain'))
+            
+            context = ssl.create_default_context()
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
+                server.login(smtp_email, smtp_password)
+                server.sendmail(smtp_email, email, msg.as_string())
+            print(f"DEBUG: Email OTP sent to {email}")
+            return jsonify({'success': True, 'message': 'OTP sent to email'})
+        except Exception as e:
+            print(f"EMAIL ERROR: {e}")
+            return jsonify({'success': False, 'message': 'Failed to send email. Ensure SMTP is configured correctly.'}), 500
+    else:
+        # Fallback to demo mode if no email configured
+        print(f"DEBUG: OTP for {email} is {otp}")
+        return jsonify({'success': True, 'message': 'OTP generated (Email not configured, check console)', 'debug_otp': otp})
+
+@app.route('/verify-otp', methods=['POST'])
+def verify_otp():
+    data = request.get_json()
+    email = data.get('email')
+    otp_input = data.get('otp')
+    
+    otp_data = otps.get(email)
+    if not otp_data:
+        return jsonify({'success': False, 'message': 'No OTP requested for this email'}), 400
+        
+    if time.time() > otp_data['expiry']:
+        del otps[email]
+        return jsonify({'success': False, 'message': 'OTP expired'}), 400
+        
+    if otp_data.get('attempts', 0) >= 3:
+        del otps[email]
+        return jsonify({'success': False, 'message': 'Maximum attempt fails. Please request a new OTP.'}), 400
+        
+    if otp_input != otp_data['otp']:
+        otp_data['attempts'] = otp_data.get('attempts', 0) + 1
+        if otp_data['attempts'] >= 3:
+            del otps[email]
+            return jsonify({'success': False, 'message': 'Maximum attempt fails. Please request a new OTP.'}), 400
+        remaining = 3 - otp_data['attempts']
+        return jsonify({'success': False, 'message': f'Invalid OTP. {remaining} attempt(s) remaining.'}), 400
+        
+    return jsonify({'success': True, 'message': 'OTP verified'})
+
+@app.route('/reset-password', methods=['POST'])
+def reset_password():
+    data = request.get_json()
+    email = data.get('email')
+    otp_input = data.get('otp')
+    new_password = data.get('new_password')
+    
+    otp_data = otps.get(email)
+    # Check attempts again just in case
+    if not otp_data or time.time() > otp_data['expiry']:
+        if email in otps:
+            del otps[email]
+        return jsonify({'success': False, 'message': 'OTP expired or not requested'}), 400
+        
+    if otp_data.get('attempts', 0) >= 3:
+        del otps[email]
+        return jsonify({'success': False, 'message': 'Maximum attempt fails. Please request a new OTP.'}), 400
+        
+    if otp_input != otp_data['otp']:
+        otp_data['attempts'] = otp_data.get('attempts', 0) + 1
+        if otp_data['attempts'] >= 3:
+            del otps[email]
+            return jsonify({'success': False, 'message': 'Maximum attempt fails. Please request a new OTP.'}), 400
+        return jsonify({'success': False, 'message': 'Invalid OTP'}), 400
+        
+    hashed_password = generate_password_hash(new_password)
+    users_col.update_one({'email': email}, {'$set': {'password': hashed_password}})
+    
+    del otps[email] # Clear OTP after use
+    return jsonify({'success': True, 'message': 'Password reset successfully'})
+
+@app.route('/logout')
+def logout():
+    session.pop('user', None)
+    response = make_cookie_response({'success': True, 'message': 'Logged out successfully'})
+    response.delete_cookie('user')
+    return response
+
+def log_analysis(user, data):
+    analysis_entry = {
+        'username': user,
+        'timestamp': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'type': data.get('type'),
+        'url': data.get('url', 'N/A'),
+        'trust_score': data.get('trust_score'),
+        'safety_status': data.get('safety_status'),
+        'total_patterns_found': data.get('total_patterns_found'),
+        'findings': data.get('findings') # Store full findings in MongoDB
+    }
+    try:
+        analyses_col.insert_one(analysis_entry)
+        print(f"Logged analysis to MongoDB for user: {user}")
+    except Exception as e:
+        print(f"Error logging to MongoDB: {e}")
+
+
+
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    username = session.get('user')
+    # Fetch history from MongoDB
+    history = list(analyses_col.find({'username': username}).sort('timestamp', -1).limit(10))
+    # Convert MongoDB objects to JSON-serializable format
+    for item in history:
+        item['_id'] = str(item['_id'])
+    return jsonify({'user': username, 'history': history})
+
+@app.route('/get-history')
+@login_required
+def get_history():
+    username = session.get('user')
+    history = list(analyses_col.find({'username': username}).sort('timestamp', -1).limit(10))
+    for item in history:
+        item['_id'] = str(item['_id'])
+    return jsonify(history)
+
+@app.route('/clear-history', methods=['POST'])
+@login_required
+def clear_user_history():
+    username = session.get('user')
+    analyses_col.delete_many({'username': username})
+    return jsonify({'success': True})
+
+@app.route('/analyze-text', methods=['POST'])
+@login_required
+def analyze_t():
+    data = request.get_json()
+    text = data.get('text')
+    if not text:
+        return jsonify({'success': False, 'error': 'Text is required'}), 400
+    result = analyze_text(text)
+    if result.get('success'):
+        log_analysis(session['user'], result)
+    return jsonify(result)
+
+@app.route('/analyze', methods=['POST'])
+@login_required
+def analyze():
+    data = request.get_json()
+    url = data.get('url')
+    if not url:
+        return jsonify({'success': False, 'error': 'URL is required'}), 400
+    result = analyze_url(url)
+    if result.get('success'):
+        log_analysis(session['user'], result)
+    return jsonify(result)
+
+@app.route('/scrape-details', methods=['POST'])
+@login_required
+def scrape_details():
+    from bs4 import BeautifulSoup
+    data = request.get_json()
+    url = data.get('url')
+    if not url:
+        return jsonify({'success': False, 'error': 'URL is required'}), 400
+    
+    if not url.startswith(('http://', 'https://')):
+        url = 'https://' + url
+
+    response = fetch_with_rotation(url)
+    if not response or response.status_code != 200:
+        return jsonify({'success': False, 'error': 'Could not fetch website. It might be blocking scrapers or offline.'})
+
+    soup = BeautifulSoup(response.text, 'html.parser')
+    
+    title = soup.title.string.strip() if soup.title and soup.title.string else 'No Title'
+    links_count = len(soup.find_all('a'))
+    images_count = len(soup.find_all('img'))
+    body_text = soup.body.get_text(strip=True) if soup.body else ''
+    words = len(body_text.split())
+
+    return jsonify({
+        'success': True,
+        'title': title,
+        'url': url,
+        'linksCount': links_count,
+        'imagesCount': images_count,
+        'words': words
+    })
+
+@app.route('/ext-analyze', methods=['POST'])
+@cross_origin()
+def ext_analyze():
+    data = request.get_json()
+    url = data.get('url')
+    if not url:
+        return jsonify({'success': False, 'error': 'URL is required'}), 400
+    
+    # We add a fallback URL check since extensions pass raw URLs 
+    result = analyze_url(url)
+    
+    # Optionally, we can log it with a dummy user 'extension_user'
+    # if result.get('success'):
+    #     log_analysis('extension_user', result)
+        
+    return jsonify(result)
+
+# --- FRONTEND SERVING ---
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve(path):
+    if path != "" and os.path.exists(os.path.join(app.static_folder, path)):
+        return send_from_directory(app.static_folder, path)
+    else:
+        return send_from_directory(app.static_folder, 'index.html')
+
+if __name__ == '__main__':
+    app.run(debug=True, port=5000)
+import os
+import requests
+from bs4 import BeautifulSoup
+import urllib3
+import pandas as pd
+import re
+import pickle
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import make_pipeline
+
+from duckduckgo_search import DDGS
+from urllib.parse import urlparse
+import difflib
+import random
+import time
+
+# Modern User-Agents for rotation
+USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/120.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:109.0) Gecko/20100101 Firefox/119.0',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Edge/119.0.0.0'
+]
+
+# Verified Official Domains (Common E-commerce/Safe sites)
+VERIFIED_DOMAINS = [
+    'amazon', 'flipkart', 'ebay', 'temu', 'aliexpress', 'walmart', 'target', 
+    'apple', 'google', 'microsoft', 'netflix', 'facebook', 'instagram', 
+    'twitter', 'linkedin', 'github', 'shopclues', 'myntra', 'ajio', 'meesho',
+    'snapdeal', 'zomato', 'swiggy', 'bigbasket', 'nykaa', 'jio', 'reliance',
+    'wayfair', 'shein', 'ikea', 'bestbuy', 'homedepot', 'costco'
+]
+
+
+# Suppress insecure request warnings
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# Function to get free proxies (Best effort basis)
+def get_free_proxies():
+    try:
+        url = "https://www.free-proxy-list.net/"
+        response = requests.get(url, timeout=5)
+        soup = BeautifulSoup(response.text, "html.parser")
+        proxies = []
+        for row in soup.find("table", {"class": "table"}).find_all("tr")[1:20]:
+            cols = row.find_all("td")
+            if cols[4].text == "elite proxy" or cols[4].text == "anonymous":
+                proxies.append(f"http://{cols[0].text}:{cols[1].text}")
+        return proxies
+    except:
+        return []
+
+def fetch_with_rotation(url):
+    """
+    Tries to fetch URL content with different identities (IPs/User-Agents) if blocked.
+    """
+    proxies_list = get_free_proxies()
+    # Try direct first, then try with random identities
+    attempts = 0
+    max_attempts = 5
+    
+    while attempts < max_attempts:
+        current_ua = random.choice(USER_AGENTS)
+        current_proxy = random.choice(proxies_list) if proxies_list and attempts > 0 else None
+        
+        headers = {
+            'User-Agent': current_ua,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Referer': 'https://www.google.com/'
+        }
+        
+        try:
+            proxy_dict = {"http": current_proxy, "https": current_proxy} if current_proxy else None
+            response = requests.get(url, headers=headers, proxies=proxy_dict, timeout=10, verify=False)
+            
+            if response.status_code == 200:
+                print(f"Fetch Successful using: {current_proxy if current_proxy else 'Direct IP'}")
+                return response
+            elif response.status_code in [403, 429]:
+                print(f"Blocked (Status {response.status_code}). Switching identity...")
+            
+        except Exception as e:
+            print(f"Attempt {attempts+1} Failed: {str(e)}")
+            
+        attempts += 1
+        # If we failed, wait a second before next attempt
+        time.sleep(1)
+        
+    return None
+
+# Paths
+base_dir = os.path.dirname(os.path.abspath(__file__))
+dataset_path_tsv = os.path.join(base_dir, 'training_data.tsv')
+dataset_path_csv = os.path.join(base_dir, 'pattern_classifications.csv')
+model_path = os.path.join(base_dir, 'dark_pattern_model.pkl')
+
+def train_and_save_model():
+    try:
+        dataframes = []
+        
+        # Load primary TSV dataset
+        if os.path.exists(dataset_path_tsv):
+            df_tsv = pd.read_csv(dataset_path_tsv, sep='\t')
+            df_tsv = df_tsv.dropna(subset=['text', 'Pattern Category'])
+            df_tsv = df_tsv.rename(columns={'Pattern Category': 'category'})
+            dataframes.append(df_tsv[['text', 'category']])
+            
+        # Load secondary CSV dataset
+        if os.path.exists(dataset_path_csv):
+            df_csv = pd.read_csv(dataset_path_csv)
+            # Map numeric 'classification' to category names or handle binary
+            # Based on inspection, 0 = Not Dark Pattern, 1 = Dark Pattern
+            # Note: The CSV might not have granular categories, so we label them 'General Dark Pattern'
+            df_csv = df_csv.dropna(subset=['Pattern String', 'classification'])
+            df_csv['category'] = df_csv['classification'].apply(lambda x: 'General Dark Pattern' if x == 1 else 'Not Dark Pattern')
+            df_csv = df_csv.rename(columns={'Pattern String': 'text'})
+            dataframes.append(df_csv[['text', 'category']])
+            
+        if not dataframes:
+            print("No datasets found for training.")
+            return None
+            
+        # Merge all data
+        df = pd.concat(dataframes, ignore_index=True)
+        df['category'] = df['category'].str.strip()
+        
+        X = df['text']
+        y = df['category']
+        
+        pipeline = make_pipeline(
+            TfidfVectorizer(stop_words='english', ngram_range=(1, 2)), 
+            LogisticRegression(class_weight='balanced', max_iter=1000, random_state=42)
+        )
+        pipeline.fit(X, y)
+        
+        with open(model_path, 'wb') as f:
+            pickle.dump(pipeline, f)
+        print("Model trained and saved with merged datasets.", flush=True)
+        return pipeline
+    except Exception as e:
+        print(f"Failed to train model: {e}", flush=True)
+        return None
+
+def load_model():
+    if os.path.exists(model_path):
+        try:
+            with open(model_path, 'rb') as f:
+                model = pickle.load(f)
+            print("Model loaded from disk.", flush=True)
+            return model
+        except Exception as e:
+            print(f"Failed to load model: {e}. Retraining...", flush=True)
+            return train_and_save_model()
+    else:
+        return train_and_save_model()
+
+# Model handling - Build Safe and Self-Healing
+_model = None
+
+def get_model():
+    global _model
+    if _model is None:
+        _model = load_model()
+    return _model
+
+def force_retrain():
+    global _model
+    print("FORCING MODEL RETRAIN due to incompatibility...", flush=True)
+    if os.path.exists(model_path):
+        try:
+            os.remove(model_path)
+        except:
+            pass
+    _model = train_and_save_model()
+    return _model
+
+def get_web_intelligence(url, domain):
+    """
+    Searches the internet for the domain's reputation, reviews, and official status.
+    """
+    # 1. Quick check if it's a known official domain to avoid incorrect "limited record" msgs
+    # Handle domain normalization (e.g. WaImart.com -> walmart)
+    normalized_for_check = domain.lower().replace('0', 'o').replace('1', 'l').replace('!', 'i')
+    
+    found_brand = None
+    for brand in VERIFIED_DOMAINS:
+        if brand in normalized_for_check:
+            found_brand = brand
+            break
+
+    # If the domain matches a verified brand exactly (official site)
+    if found_brand and any(domain.lower().endswith(f"{found_brand}.{tld}") for tld in ['com', 'in', 'org', 'net', 'co']):
+        return {
+            'reputation_score': 100,
+            'summary': f"This is a verified official domain for {found_brand.upper()}.",
+            'is_verified_business': True,
+            'search_snippets': []
+        }
+
+    intelligence = {
+        'reputation_score': 50,
+        'summary': f"Limited public records for {domain}. Caution is advised as it isn't a widely recognized platform.",
+        'is_verified_business': False,
+        'search_snippets': []
+    }
+    
+    try:
+        with DDGS() as ddgs:
+            # Search query for reputation
+            query = f"{domain} reviews official or scam"
+            results = list(ddgs.text(query, max_results=5))
+            
+            scam_mentions = 0
+            trust_mentions = 0
+            
+            for r in results:
+                text = (r['title'] + " " + r['body']).lower()
+                intelligence['search_snippets'].append(r['title'])
+                
+                if any(word in text for word in ['scam', 'fake', 'fraud', 'dangerous', 'not official', 'copy']):
+                    scam_mentions += 1
+                if any(word in text for word in ['legit', 'official', 'verified', 'safe', 'trusted']):
+                    trust_mentions += 1
+            
+            if scam_mentions > trust_mentions:
+                intelligence['reputation_score'] = 20
+                intelligence['summary'] = "Internet search suggests this might be a SCAM or a COPY of a real site. Multiple sources mention risk."
+            elif trust_mentions > 2:
+                intelligence['reputation_score'] = 90
+                intelligence['is_verified_business'] = True
+                intelligence['summary'] = "Verified business records and positive user reviews found online."
+                
+    except Exception as e:
+        print(f"Intelligence Gather Error: {e}")
+        intelligence['summary'] = "Reputation check temporarily unavailable."
+        
+    return intelligence
+
+def is_url_suspicious(url):
+    """
+    Checks if a URL mimics a famous brand but isn't the official domain.
+    Includes advanced fuzzy matching, vowel swapping, and character duplication checks.
+    """
+    try:
+        parsed = urlparse(url)
+        domain = parsed.netloc.lower()
+        if domain.startswith('www.'):
+            domain = domain[4:]
+            
+        # 1. Check for high-risk keywords
+        risk_keywords = ['deals', 'clearance', 'sale', 'discount', 'offers', 'free', 'gift', 'prize', 'winner', 'shop-now', 'mega-sale']
+        found_keywords = [kw for kw in risk_keywords if kw in domain]
+        
+        # 2. Extract the SLD (Main Brand Name)
+        domain_parts = domain.split('.')
+        # If domain is 'google.co.in', sld is 'google'
+        # If domain is 'flipkart.com', sld is 'flipkart'
+        sld = domain_parts[0] if domain_parts else domain
+        
+        # 3. Check for exact official brand domain pattern
+        is_official = False
+        for brand in VERIFIED_DOMAINS:
+            # Match brand.anything or sub.brand.anything (Direct official link)
+            pattern = re.compile(rf"^(.*\.)?{brand}\.[a-z.]{{2,}}$")
+            if pattern.match(domain):
+                is_official = True
+                break
+        
+        if is_official: return False, True, ""
+
+        # 4. Normalize domain for comparison: Remove duplicates & swap chars
+        norm_sld = re.sub(r'(.)\1+', r'\1', sld) # 'flipkarrt' -> 'flipkart', 'zooom' -> 'zoom'
+        chars_map = str.maketrans('01!534v8', 'oliiseua') # 'amaz0n' -> 'amazon'
+        norm_sld = norm_sld.translate(chars_map)
+
+        for brand in VERIFIED_DOMAINS:
+            # A. Fuzzy Similarity (SequenceMatcher)
+            similarity = difflib.SequenceMatcher(None, brand, sld).ratio()
+            
+            # B. Character Check (Does it look like a copy?)
+            # Handle variations like 'amazan' -> 'amazon' (vowel shift)
+            vowel_shift = False
+            if len(brand) == len(sld):
+                diff_count = sum(1 for a, b in zip(brand, sld) if a != b)
+                # If only 1 or 2 vowels are different, it's a clone
+                vowels = 'aeiou'
+                mismatches = [(a,b) for a,b in zip(brand, sld) if a != b]
+                if 0 < diff_count <= 2 and all(m[0] in vowels and m[1] in vowels for m in mismatches):
+                    vowel_shift = True
+
+            # C. Official Compare Check
+            is_copy = (similarity >= 0.8) or (brand in norm_sld) or vowel_shift
+            
+            if is_copy:
+                diff_details = ""
+                for s in difflib.ndiff(brand, sld):
+                    if s[0] == '+': diff_details += f" added '{s[-1]}',"
+                    elif s[0] == '-': diff_details += f" missing '{s[-1]}',"
+                
+                diff_msg = f" (Differences: {diff_details.strip(',')})" if diff_details else ""
+                
+                return True, False, f"CRITICAL: Minor changes in website URL ('{domain}') detected! We compared it character-by-character with the official website '{brand}.com'{diff_msg}. EACH AND EVERY word/character must be correct. This is a suspicious fake!"
+
+        if found_keywords:
+            return True, False, f"CAUTION: This URL uses high-pressure words like '{', '.join(found_keywords)}'. Scam websites often use these titles to trick people."
+        
+        return False, False, ""
+    except:
+        return False, False, ""
+
+def perform_prediction(visible_texts):
+    """
+    Core prediction logic shared between URL and Text analysis.
+    Uses ML model + Heuristic Keywords for 100% detection accuracy.
+    """
+    results = {}
+    total_patterns = 0
+    
+    if not visible_texts:
+        return results, total_patterns
+
+    # HEURISTIC KEYWORDS (Catch patterns ML might miss)
+    heuristics = [
+        (r'\b(hurry|limited time|expires|midnight|countdown|last chance|hasten|fast|running out)\b', 'Urgency'),
+        (r'\b(win|claim|gift card|selected to receive|reward|prize|congratulations|lucky|winner)\b', 'Bait and Switch'),
+        (r'\b(only \d+ left|stock|available|demand|exclusive|rare|selling fast)\b', 'Scarcity'),
+        (r'\b(hidden|cost|fee|recurring|subscription|trial|charge|extra)\b', 'Hidden Costs'),
+        (r'\b(fake|verified by|trusted by \d+|live stats|people are looking)\b', 'Social Proof')
+    ]
+    
+    # 1. ML Model Predictions
+    for attempt in range(2): # 2 attempts: First might fail and trigger retrain
+        model = get_model()
+        if not model:
+            break
+            
+        try:
+            predictions = model.predict(visible_texts)
+            probabilities = model.predict_proba(visible_texts)
+            class_to_idx = {cls: i for i, cls in enumerate(model.classes_)}
+            
+            for text, pred, proba in zip(visible_texts, predictions, probabilities):
+                if pred != 'Not Dark Pattern':
+                    category = pred.title()
+                    if category not in results:
+                        results[category] = []
+                    
+                    conf_score = proba[class_to_idx[pred]]
+                    if text not in [f['text'] for f in results[category]]:
+                        results[category].append({'text': text, 'confidence': float(conf_score)})
+                        total_patterns += 1
+            break # Success, exit retry loop
+            
+        except AttributeError as e:
+            if 'multi_class' in str(e) and attempt == 0:
+                print("Detected scikit-learn version mismatch. Retraining and retrying...", flush=True)
+                force_retrain()
+                # Clear any partial results from first failed attempt
+                results = {}
+                total_patterns = 0
+                continue 
+            print(f"Prediction Error (AttributeError): {e}")
+            break
+        except Exception as e:
+            print(f"Prediction Error (Generic): {e}")
+            break
+
+    # 2. Heuristic Scanner (Adds patterns found by keywords)
+    for text in visible_texts:
+        text_lower = text.lower()
+        for pattern_regex, category in heuristics:
+            if re.search(pattern_regex, text_lower):
+                if category not in results:
+                    results[category] = []
+                
+                # Check if this text was already caught by ML in this category
+                if text not in [f['text'] for f in results[category]]:
+                    results[category].append({
+                        'text': text,
+                        'confidence': 0.95, # High confidence for direct keyword matches
+                        'is_heuristic': True
+                    })
+                    total_patterns += 1
+                
+    return results, total_patterns
+
+def analyze_text(raw_text):
+    """
+    Analyzes a raw block of text for dark patterns based on link presence and content.
+    Logic: 
+    1. If links found and official -> SAFE.
+    2. If links found but suspicious or unreachable -> UNSAFE + Pattern Analysis.
+    3. If no links -> Pattern Analysis (TF-IDF + ML).
+    """
+    try:
+        if not raw_text or len(raw_text.strip()) < 10:
+            return {'success': False, 'error': 'Validation Error: Text is too short (minimum 10 characters).'}
+            
+        sentences = re.split(r'(?<=[.!?])\s+', raw_text.strip())
+        visible_texts = [s.strip() for s in sentences if len(s.strip()) > 10 and not s.strip().isdigit()]
+        
+        if not visible_texts:
+            return {'success': False, 'error': 'Validation Error: No analyzable sentences found.'}
+
+        # 1. Regex to find potential URLs
+        url_pattern = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+        urls_in_text = re.findall(url_pattern, raw_text)
+        
+        security_warning = None
+        has_official_link = False
+        has_suspicious_link = False
+        has_unreachable_link = False
+        
+        if urls_in_text:
+            for url in urls_in_text:
+                is_suspicious, is_official, warning = is_url_suspicious(url)
+                
+                if is_official:
+                    has_official_link = True
+                elif is_suspicious:
+                    has_suspicious_link = True
+                    security_warning = warning
+                    break # Stop at first major threat
+                else:
+                    # Check reachability for non-official, non-suspicious generic links
+                    try:
+                        resp = requests.head(url, timeout=3, allow_redirects=True, verify=False)
+                        if resp.status_code >= 400:
+                            has_unreachable_link = True
+                            security_warning = f"CAUTION: The link '{url}' found in this text appears to be broken or unreachable. This is common in temporary phishing messages."
+                    except:
+                        has_unreachable_link = True
+                        security_warning = f"CAUTION: The link '{url}' found in this text is unreachable. Proceed with extreme caution."
+
+            # Logic based on link findings
+            if has_official_link and not has_suspicious_link and not has_unreachable_link:
+                return {
+                    'success': True,
+                    'type': 'text',
+                    'title': 'Official Context Verified',
+                    'findings': [],
+                    'total_patterns_found': 0,
+                    'security_warning': None,
+                    'trust_score': 100,
+                    'safety_status': 'SAFE (OFFICIAL CONTEXT)'
+                }
+
+        # 2. Perform Pattern Analysis (ML Model uses TF-IDF Pipeline)
+        # This is reached if No Links, OR if links are Suspicious/Unreachable
+        findings_dict, total_patterns = perform_prediction(visible_texts)
+        
+        # Additional Brand Keywords check (for text without links)
+        if not urls_in_text and not security_warning:
+            for brand in VERIFIED_DOMAINS:
+                if brand in raw_text.lower() and any(word in raw_text.lower() for word in ['gift card', 'reward', 'win', 'claim', 'free', 'prize']):
+                    security_warning = f"CAUTION: This text mentions {brand.upper()} with words like 'Gift Card' or 'Claim'. Scammers often use brand names to build fake trust."
+                    break
+
+        formatted_findings = []
+        for cat, items in findings_dict.items():
+            formatted_findings.append({
+                'category': cat,
+                'count': len(items)
+            })
+
+        # Calculate Trust Score
+        trust_score = 100
+        if has_suspicious_link:
+            trust_score = 10
+        elif has_unreachable_link:
+            trust_score = 30
+        elif security_warning:
+            trust_score = 50
+            
+        trust_score -= (len(findings_dict) * 10)
+        trust_score -= (total_patterns * 2)
+        trust_score = max(0, min(100, trust_score))
+        
+        safety_status = "Safe"
+        if has_suspicious_link: safety_status = "UNSAFE (PHISHING LIKELY)"
+        elif has_unreachable_link: safety_status = "UNSAFE (BROKEN LINKS)"
+        elif trust_score < 35: safety_status = "Unsafe"
+        elif trust_score < 70: safety_status = "Suspicious"
+        
+        return {
+            'success': True,
+            'type': 'text',
+            'title': 'Manual Text Entry',
+            'findings': formatted_findings,
+            'total_patterns_found': total_patterns,
+            'security_warning': security_warning,
+            'trust_score': int(trust_score),
+            'safety_status': safety_status
+        }
+    except Exception as e:
+        return {'success': False, 'error': f'Processing Error: {str(e)}'}
+
+def analyze_url(url):
+    try:
+        # 1. Basic cleaning and validation
+        url = url.strip()
+        if not url:
+            return {'success': False, 'error': 'URL is required'}
+            
+        # Clean protocol for validation check
+        check_domain = url.replace('http://', '').replace('https://', '').split('/')[0].lower()
+        
+        # Robust Regex for Domain validation (Handles .com, .in, .co.in, subdomains, etc.)
+        # No spaces allowed, must have dots and a valid TLD structure
+        domain_pattern = re.compile(
+            r'^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}(?:\.[a-z]{2,})?$'
+        )
+        
+        if not domain_pattern.match(check_domain):
+            return {'success': False, 'error': 'Validation Error: Please enter a valid website URL or domain (e.g., amazon.in or flipkart.com). Plain text sentences are not accepted here.'}
+
+        # 2. Standardize URL input
+        if not url.startswith(('http://', 'https://')):
+            url = 'https://' + url
+            
+        # 3. OPEN THE WEBSITE LINK ON THE INTERNET FIRST (to resolve redirects)
+        try:
+            # Use our rotation helper to bypass blocking and get the FINAL URL
+            response = fetch_with_rotation(url)
+            if response is None or response.status_code != 200:
+                raise Exception("Failed after multiple rotation attempts")
+            
+            final_url = response.url # This gets the actual website the link opens!
+        except Exception as e:
+            # If we completely failed to open it (e.g. 403 Forbidden by anti-bot, or it doesn't exist)
+            # Run suspicious checks on the original URL to warn them
+            is_suspicious, is_official, warning = is_url_suspicious(url)
+            domain_name = urlparse(url).netloc.lower()
+            
+            # Use intelligence to see what the internet thinks about this offline site
+            web_intel = get_web_intelligence(url, domain_name)
+            
+            status = 'UNVERIFIED (OFFLINE)'
+            title = 'Website Unreachable'
+            trust = 40
+            
+            error_msg = f"The website at {url} could not be reached or has permanently blocked access. Check your connection or the URL spelling."
+            
+            if is_suspicious:
+                status = 'UNSAFE (SCAM LIKELY)'
+                title = 'Potential Malicious Site'
+                trust = 0
+                error_msg = f"CRITICAL: This suspicious copy ('{domain_name}') is currently unreachable or blocking analysis. We recommend NOT attempting to visit this URL again. {warning}"
+            elif is_official or web_intel.get('is_verified_business') or web_intel.get('reputation_score', 0) >= 80:
+                # E.g. wayfair.com blocking our scraper with 403, but it's a known legit site
+                status = 'SAFE (OFFICIAL SITE BLOCKING SCRAPERS)'
+                title = f"OFFICIAL {domain_name.upper()} WEBSITE (Analysis Blocked)"
+                trust = 100
+                error_msg = f"This is a legitimate website, but it has blocked our automated scraper from reading the patterns on the page."
+            
+            return {
+                'success': True,
+                'type': 'url',
+                'url': url,
+                'title': title,
+                'findings': [],
+                'total_patterns_found': 0,
+                'security_warning': error_msg,
+                'web_intelligence': web_intel['summary'],
+                'is_official': (is_official or trust == 100),
+                'trust_score': trust,
+                'safety_status': status
+            }
+
+        # 4. Security Check: Is the FINAL resulting domain suspicious?
+        is_suspicious, is_official, warning = is_url_suspicious(final_url)
+        
+        # 5. Fetch Web Intelligence (Searching the Internet)
+        domain_name = urlparse(final_url).netloc.lower()
+        web_intel = get_web_intelligence(final_url, domain_name)
+        
+        # 6. Handle Official Websites early
+        if is_official:
+            return {
+                'success': True,
+                'type': 'url',
+                'url': final_url, # Show the final resolved URL
+                'title': f"OFFICIAL {domain_name.upper()} WEBSITE (Redirect Verified)",
+                'findings': [],
+                'total_patterns_found': 0,
+                'security_warning': None,
+                'web_intelligence': "Verified Official Domain.",
+                'is_official': True,
+                'trust_score': 100,
+                'safety_status': 'SAFE (OFFICIAL WEBSITE)'
+            }
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+        # Clean up soup...
+        for script in soup(["script", "style", "nav", "footer", "iframe"]):
+            script.extract()
+            
+        visible_texts = []
+        seen_texts = set()
+        for element in soup.stripped_strings:
+            text = element.strip()
+            if len(text) > 10 and not text.isdigit():
+                sentences = re.split(r'(?<=[.!?])\s+', text)
+                for sentence in sentences:
+                    sentence = sentence.strip()
+                    if len(sentence) > 10 and sentence not in seen_texts:
+                        visible_texts.append(sentence)
+                        seen_texts.add(sentence)
+                
+        # Perform Pattern Analysis
+        findings_dict, total_patterns = perform_prediction(visible_texts)
+        
+        # Calculate Trust Score
+        trust_score = 100
+        if is_suspicious: 
+            trust_score = 10 # Start very low for suspicious copies
+        
+        trust_score -= (len(findings_dict) * 8)
+        trust_score -= (total_patterns * 1.5)
+        trust_score = max(0, min(100, trust_score))
+        
+        safety_status = "Safe"
+        if is_suspicious: 
+            safety_status = "UNSAFE (SUSPICIOUS COPY)"
+        elif trust_score < 30: 
+            safety_status = "Unsafe"
+        elif trust_score < 65: 
+            safety_status = "Suspicious"
+
+        # Format findings
+        formatted_findings = []
+        for cat, items in findings_dict.items():
+            formatted_findings.append({'category': cat, 'count': len(items)})
+
+        return {
+            'success': True,
+            'type': 'url',
+            'url': final_url,
+            'title': soup.title.string.strip() if soup.title and soup.title.string else 'No Title',
+            'findings': formatted_findings,
+            'total_patterns_found': total_patterns,
+            'security_warning': warning if is_suspicious else None,
+            'web_intelligence': web_intel['summary'],
+            'is_official': False,
+            'trust_score': int(trust_score),
+            'safety_status': safety_status
+        }
+    except Exception as e:
+        return {'success': False, 'error': f'Processing Error: {str(e)}'}
+
+from duckduckgo_search import DDGS
+from urllib.parse import urlparse
+
+try:
+    domain = 'wayfaiir' # user typo
+    results = list(DDGS().text(f"{domain} official website", max_results=2))
+    for r in results:
+        parsed = urlparse(r.get('href', ''))
+        print(r['title'], " | Domain:", parsed.netloc)
+except Exception as e:
+    print("Error:", e)
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urlparse, parse_qs, unquote
+import time
+
+def verify_domain_via_search(domain):
+    """
+    Searches DuckDuckGo for the domain. Returns (is_legit, official_domain_if_different).
+    """
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': 'https://duckduckgo.com/'
+        }
+        res = requests.get(f"https://html.duckduckgo.com/html/?q={domain}+official+website", headers=headers, timeout=5)
+        soup = BeautifulSoup(res.text, 'html.parser')
+        
+        results = []
+        for a in soup.find_all('a', class_='result__url'):
+            href = a.get('href', '').strip()
+            if 'uddg=' in href:
+                qs = parse_qs(urlparse(href).query)
+                if 'uddg' in qs:
+                    actual_url = qs['uddg'][0]
+                    parsed_netloc = urlparse(unquote(actual_url)).netloc.lower()
+                    if parsed_netloc.startswith('www.'):
+                        parsed_netloc = parsed_netloc[4:]
+                    results.append(parsed_netloc)
+            if len(results) >= 3:
+                break
+                
+        if not results:
+            return False, None
+            
+        top_result = results[0]
+        domain_without_www = domain.lower()
+        if domain_without_www.startswith('www.'):
+            domain_without_www = domain_without_www[4:]
+            
+        # Check if the exact typed domain matches the #1 search result on the internet
+        if top_result == domain_without_www or domain_without_www in top_result:
+            return True, top_result # It is the official website
+        else:
+            return False, top_result # It might be a fake, because internet says top result is something else!
+            
+    except Exception as e:
+        print("DDG Search Error:", e)
+        return False, None
+
+print(verify_domain_via_search('adidas.com'))
+print(verify_domain_via_search('wayfaiir.com'))
+print(verify_domain_via_search('amazon.in'))
+print(verify_domain_via_search('coursera.org'))
+import requests
+from bs4 import BeautifulSoup
+from urllib.parse import urlparse, parse_qs, unquote
+
+def search_ddg_html(query):
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    res = requests.get(f"https://html.duckduckgo.com/html/?q={query}", headers=headers)
+    soup = BeautifulSoup(res.text, 'html.parser')
+    results = []
+    for a in soup.find_all('a', class_='result__url'):
+        href = a.get('href', '').strip()
+        if 'uddg=' in href:
+            qs = parse_qs(urlparse(href).query)
+            if 'uddg' in qs:
+                actual_url = qs['uddg'][0]
+                results.append(unquote(actual_url))
+        if len(results) >= 3:
+            break
+    print(results)
+
+search_ddg_html("wayfaiir official website")
+search_ddg_html("amazon official website")
+search_ddg_html("tesafe official website")
+search_ddg_html("bestbuy official website")
