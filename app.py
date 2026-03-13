@@ -332,9 +332,11 @@ def analyze_t():
 @login_required
 def analyze():
     data = request.get_json()
-    url = data.get('url')
+    url = data.get('url', '').strip()
     if not url:
         return jsonify({'success': False, 'error': 'URL is required'}), 400
+    if not url.startswith(('http://', 'https://')):
+        url = 'https://' + url
     result = analyze_url(url)
     if result.get('success'):
         log_analysis(session['user'], result)
