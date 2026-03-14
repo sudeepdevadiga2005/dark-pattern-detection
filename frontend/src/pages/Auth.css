@@ -275,3 +275,103 @@ form {
     margin-bottom: 20px;
     border-radius: 8px;
 }
+
+/* Base style for the mobile toggle (hidden on desktop) */
+.mobile-toggle {
+    display: none;
+    font-size: 15px;
+    color: var(--rust);
+    cursor: pointer;
+    margin-top: 24px;
+    text-decoration: underline;
+    font-weight: 600;
+}
+
+.hidden-flow {
+    display: none !important;
+}
+
+/* =============================================
+   RESPONSIVE DESIGN — TABLET & MOBILE (max 1024px)
+   ============================================= */
+@media (max-width: 1024px) {
+    .auth-card {
+        width: 100vw;
+        height: 100vh;
+        max-height: 100vh;
+        border-radius: 0;
+        border: none;
+        display: block; /* Disable grid */
+        overflow-y: auto; /* Allow scrolling */
+        background: var(--cream);
+    }
+
+    .overlay-container {
+        display: none;
+    }
+
+    .mobile-toggle {
+        display: block;
+    }
+
+    .form-container {
+        position: relative;
+        width: 100% !important;
+        height: min-content;
+        min-height: 100vh;
+        transform: none !important;
+        left: 0 !important;
+    }
+
+    /* Handle visibility manually without sliding */
+    .sign-up-container {
+        display: none;
+        opacity: 1 !important;
+    }
+
+    .right-panel-active .sign-up-container {
+        display: block;
+    }
+
+    .sign-in-container, .forgot-container {
+        display: block;
+        opacity: 1 !important;
+    }
+
+    .right-panel-active .sign-in-container,
+    .right-panel-active .forgot-container {
+        display: none !important;
+    }
+
+    form {
+        padding: 40px 24px;
+        justify-content: center;
+        padding-top: 60px;
+    }
+
+    .form-title {
+        font-size: 42px;
+        margin-bottom: 30px;
+        text-align: center;
+    }
+
+    .field-group {
+        margin-bottom: 20px;
+    }
+
+    .field-group input {
+        font-size: 18px;
+        padding: 14px 0;
+    }
+
+    .field-group label {
+        font-size: 15px;
+        top: 14px;
+    }
+
+    .btn-main {
+        font-size: 18px;
+        padding: 18px;
+        margin-top: 20px;
+    }
+}

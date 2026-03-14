@@ -216,11 +216,12 @@ const AuthPage = () => {
                             <div className="bar"></div>
                         </div>
                         <button className="btn-main" type="submit">Complete Registration</button>
+                        <span className="mobile-toggle" onClick={() => togglePanel(false)}>Already have an account? Sign In</span>
                     </form>
                 </div>
 
                 {/* Login Form */}
-                <div className="form-container sign-in-container" style={{ display: forgotFlow ? 'none' : 'block' }}>
+                <div className={`form-container sign-in-container ${forgotFlow ? 'hidden-flow' : ''}`}>
                     <form onSubmit={handleLogin}>
                         <h2 className="form-title">Welcome Back.</h2>
                         {error && <div className="error-msg error-visible">{error}</div>}
@@ -251,6 +252,7 @@ const AuthPage = () => {
                         </div>
                         <span className="forgot-pass" onClick={() => setForgotFlow(true)}>Forgotten your password?</span>
                         <button className="btn-main" type="submit">Sign In →</button>
+                        <span className="mobile-toggle" onClick={() => togglePanel(true)}>Don't have an account? Sign Up</span>
                     </form>
                 </div>
 
