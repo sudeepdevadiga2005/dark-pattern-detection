@@ -190,6 +190,7 @@ def forgot_password():
     
     # Function to send email in the background
     def send_email_async(smtp_email, smtp_password, recipient_email, otp_code):
+        print(f"DEBUG: Starting background email thread for {recipient_email}...")
         try:
             msg = MIMEMultipart()
             msg['From'] = f"Dark Pattern Detection <{smtp_email}>"
@@ -198,14 +199,18 @@ def forgot_password():
             body = f'Your one-time password (OTP) is: {otp_code}. Do not share this code.\n\nIt expires in 120 seconds.'
             msg.attach(MIMEText(body, 'plain'))
             
+            print("DEBUG: Connecting to Gmail SMTP server (smtp.gmail.com:465)...")
             context = ssl.create_default_context()
             with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
+                print("DEBUG: Connected. Attempting to login...")
                 server.login(smtp_email, smtp_password)
+                print("DEBUG: Login successful. Sending email...")
                 server.sendmail(smtp_email, recipient_email, msg.as_string())
-            print(f"DEBUG: Email OTP sent asynchronously to {recipient_email}")
+                print(f"DEBUG: Email OTP successfully sent asymptotically to {recipient_email}")
+        except smtplib.SMTPAuthenticationError:
+            print("EMAIL ERROR: Authentication failed. Please check SMTP_EMAIL and SMTP_APP_PASSWORD. Ensure you are using a 16-character App Password, NOT your regular Gmail password.")
         except Exception as e:
             print(f"EMAIL ERROR in background thread: {e}")
-
     # Try sending email
     smtp_email = os.getenv("SMTP_EMAIL")
     smtp_password = os.getenv("SMTP_APP_PASSWORD")
@@ -214,7 +219,7 @@ def forgot_password():
         try:
             # Start background thread to send email
             email_thread = threading.Thread(target=send_email_async, args=(smtp_email, smtp_password, email, otp))
-            email_thread.daemon = True # Daemon threads don't block app exit
+            # Start the thread normally, not as a daemon, to ensure it finishes connecting even if the API responds first
             email_thread.start()
             
             return jsonify({'success': True, 'message': 'OTP sent to email'})
