@@ -166,8 +166,7 @@ def make_cookie_response(data):
     from flask import make_response
     return make_response(jsonify(data))
 
-# OTP STORAGE (In-memory for simplicity, or use a dedicated collection)
-otps = {} 
+# OTP Storage in MongoDB (removes in-memory dictionary that breaks on multi-worker servers)
 
 @app.route('/api/forgot-password', methods=['POST'])
 def forgot_password():
@@ -181,7 +180,12 @@ def forgot_password():
     otp = "".join([str(random.randint(0, 9)) for _ in range(6)])
     expiry = time.time() + 120 # 2 minutes expiry
     
-    otps[email] = {'otp': otp, 'expiry': expiry, 'attempts': 0}
+    # Save OTP to MongoDB directly inside the user's document
+    if users_col is not None:
+        users_col.update_one(
+            {'_id': user['_id']},
+            {'$set': {'reset_otp': otp, 'reset_otp_expiry': expiry, 'reset_otp_attempts': 0}}
+        )
     
     # Try sending email
     smtp_email = os.getenv("SMTP_EMAIL")
@@ -216,24 +220,27 @@ def verify_otp():
     email = data.get('email')
     otp_input = data.get('otp')
     
-    otp_data = otps.get(email)
-    if not otp_data:
+    user = users_col.find_one({'email': email})
+    if not user or 'reset_otp' not in user:
         return jsonify({'success': False, 'message': 'No OTP requested for this email'}), 400
         
-    if time.time() > otp_data['expiry']:
-        del otps[email]
+    if time.time() > user.get('reset_otp_expiry', 0):
+        # Expiry reached, clear OTP data
+        users_col.update_one({'_id': user['_id']}, {'$unset': {'reset_otp': "", 'reset_otp_expiry': "", 'reset_otp_attempts': ""}})
         return jsonify({'success': False, 'message': 'OTP expired'}), 400
         
-    if otp_data.get('attempts', 0) >= 3:
-        del otps[email]
+    attempts = user.get('reset_otp_attempts', 0)
+    if attempts >= 3:
+        users_col.update_one({'_id': user['_id']}, {'$unset': {'reset_otp': "", 'reset_otp_expiry': "", 'reset_otp_attempts': ""}})
         return jsonify({'success': False, 'message': 'Maximum attempt fails. Please request a new OTP.'}), 400
         
-    if otp_input != otp_data['otp']:
-        otp_data['attempts'] = otp_data.get('attempts', 0) + 1
-        if otp_data['attempts'] >= 3:
-            del otps[email]
+    if otp_input != user.get('reset_otp'):
+        attempts += 1
+        users_col.update_one({'_id': user['_id']}, {'$set': {'reset_otp_attempts': attempts}})
+        if attempts >= 3:
+            users_col.update_one({'_id': user['_id']}, {'$unset': {'reset_otp': "", 'reset_otp_expiry': "", 'reset_otp_attempts': ""}})
             return jsonify({'success': False, 'message': 'Maximum attempt fails. Please request a new OTP.'}), 400
-        remaining = 3 - otp_data['attempts']
+        remaining = 3 - attempts
         return jsonify({'success': False, 'message': f'Invalid OTP. {remaining} attempt(s) remaining.'}), 400
         
     return jsonify({'success': True, 'message': 'OTP verified'})
@@ -245,28 +252,23 @@ def reset_password():
     otp_input = data.get('otp')
     new_password = data.get('new_password')
     
-    otp_data = otps.get(email)
-    # Check attempts again just in case
-    if not otp_data or time.time() > otp_data['expiry']:
-        if email in otps:
-            del otps[email]
+    user = users_col.find_one({'email': email})
+    if not user or 'reset_otp' not in user:
         return jsonify({'success': False, 'message': 'OTP expired or not requested'}), 400
         
-    if otp_data.get('attempts', 0) >= 3:
-        del otps[email]
-        return jsonify({'success': False, 'message': 'Maximum attempt fails. Please request a new OTP.'}), 400
-        
-    if otp_input != otp_data['otp']:
-        otp_data['attempts'] = otp_data.get('attempts', 0) + 1
-        if otp_data['attempts'] >= 3:
-            del otps[email]
-            return jsonify({'success': False, 'message': 'Maximum attempt fails. Please request a new OTP.'}), 400
-        return jsonify({'success': False, 'message': 'Invalid OTP'}), 400
+    if time.time() > user.get('reset_otp_expiry', 0) or otp_input != user.get('reset_otp'):
+        users_col.update_one({'_id': user['_id']}, {'$unset': {'reset_otp': "", 'reset_otp_expiry': "", 'reset_otp_attempts': ""}})
+        return jsonify({'success': False, 'message': 'Invalid or expired OTP'}), 400
         
     hashed_password = generate_password_hash(new_password)
-    users_col.update_one({'email': email}, {'$set': {'password': hashed_password}})
+    users_col.update_one(
+        {'_id': user['_id']}, 
+        {
+            '$set': {'password': hashed_password},
+            '$unset': {'reset_otp': "", 'reset_otp_expiry': "", 'reset_otp_attempts': ""}
+        }
+    )
     
-    del otps[email] # Clear OTP after use
     return jsonify({'success': True, 'message': 'Password reset successfully'})
 
 @app.route('/api/logout')
