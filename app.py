@@ -76,7 +76,7 @@ def login_required(f):
             return jsonify({'success': False, 'message': 'Unauthorized'}), 401
             
         # Verify if the current session_id matches the one in the database
-        if users_col:
+        if users_col is not None:
             user = users_col.find_one({'username': session['user']})
             if not user or user.get('session_id') != session['session_id']:
                 # The session_id in DB is different (meaning they logged in elsewhere)
