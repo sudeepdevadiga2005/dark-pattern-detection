@@ -13,6 +13,7 @@ import time
 import smtplib
 import ssl
 import uuid
+import threading
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -187,28 +188,39 @@ def forgot_password():
             {'$set': {'reset_otp': otp, 'reset_otp_expiry': expiry, 'reset_otp_attempts': 0}}
         )
     
+    # Function to send email in the background
+    def send_email_async(smtp_email, smtp_password, recipient_email, otp_code):
+        try:
+            msg = MIMEMultipart()
+            msg['From'] = f"Dark Pattern Detection <{smtp_email}>"
+            msg['To'] = recipient_email
+            msg['Subject'] = 'Your OTP Verification Code'
+            body = f'Your one-time password (OTP) is: {otp_code}. Do not share this code.\n\nIt expires in 120 seconds.'
+            msg.attach(MIMEText(body, 'plain'))
+            
+            context = ssl.create_default_context()
+            with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context, timeout=10) as server:
+                server.login(smtp_email, smtp_password)
+                server.sendmail(smtp_email, recipient_email, msg.as_string())
+            print(f"DEBUG: Email OTP sent asynchronously to {recipient_email}")
+        except Exception as e:
+            print(f"EMAIL ERROR in background thread: {e}")
+
     # Try sending email
     smtp_email = os.getenv("SMTP_EMAIL")
     smtp_password = os.getenv("SMTP_APP_PASSWORD")
     
     if smtp_email and smtp_password and smtp_email != 'your_email@gmail.com':
         try:
-            msg = MIMEMultipart()
-            msg['From'] = f"Dark Pattern Detection <{smtp_email}>"
-            msg['To'] = email
-            msg['Subject'] = 'Your OTP Verification Code'
-            body = f'Your one-time password (OTP) is: {otp}. Do not share this code.\n\nIt expires in 120 seconds.'
-            msg.attach(MIMEText(body, 'plain'))
+            # Start background thread to send email
+            email_thread = threading.Thread(target=send_email_async, args=(smtp_email, smtp_password, email, otp))
+            email_thread.daemon = True # Daemon threads don't block app exit
+            email_thread.start()
             
-            context = ssl.create_default_context()
-            with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context, timeout=10) as server:
-                server.login(smtp_email, smtp_password)
-                server.sendmail(smtp_email, email, msg.as_string())
-            print(f"DEBUG: Email OTP sent to {email}")
             return jsonify({'success': True, 'message': 'OTP sent to email'})
         except Exception as e:
-            print(f"EMAIL ERROR: {e}")
-            return jsonify({'success': False, 'message': 'Failed to send email. Ensure SMTP is configured correctly.'}), 500
+            print(f"THREAD ERROR: {e}")
+            return jsonify({'success': False, 'message': 'Failed to initiate email task.'}), 500
     else:
         # Fallback to demo mode if no email configured
         print(f"DEBUG: OTP for {email} is {otp}")
