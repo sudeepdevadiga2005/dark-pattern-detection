@@ -7,16 +7,40 @@ import './ClientHome.css';
 
 const ClientHome = () => {
     const [user, setUser] = useState(Cookies.get('user') || 'User');
+    const [isLoading, setIsLoading] = useState(true);
+
+    useEffect(() => {
+        const verifySession = async () => {
+            try {
+                // Ping a protected route to verify the session hasn't been invalidated
+                const res = await axios.get(`${API_BASE_URL}/dashboard`);
+                setUser(res.data.user);
+                setIsLoading(false);
+            } catch (err) {
+                if (err.response?.status === 401) {
+                    // Session was invalidated (e.g. logged in elsewhere)
+                    Cookies.remove('user');
+                    window.location.href = '/login';
+                }
+            }
+        };
+        verifySession();
+    }, []);
 
     const handleLogout = async () => {
         try {
             await axios.get(`${API_BASE_URL}/logout`);
+            Cookies.remove('user');
             window.location.href = '/login';
         } catch (err) {
+            Cookies.remove('user');
             window.location.href = '/login';
         }
     };
 
+    if (isLoading) {
+        return <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0e0d0b', color: '#fff' }}>Verifying Identity...</div>;
+    }
     return (
         <div className="client-home-wrapper">
             <div className="bg-canvas">

@@ -12,6 +12,7 @@ import random
 import time
 import smtplib
 import ssl
+import uuid
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -71,8 +72,17 @@ def log_session():
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if 'user' not in session:
+        if 'user' not in session or 'session_id' not in session:
             return jsonify({'success': False, 'message': 'Unauthorized'}), 401
+            
+        # Verify if the current session_id matches the one in the database
+        if users_col:
+            user = users_col.find_one({'username': session['user']})
+            if not user or user.get('session_id') != session['session_id']:
+                # The session_id in DB is different (meaning they logged in elsewhere)
+                session.clear()
+                return jsonify({'success': False, 'message': 'Session expired or logged in from another device. Please login again.'}), 401
+                
         return f(*args, **kwargs)
     return decorated_function
 
@@ -133,7 +143,19 @@ def login():
         
         user = users_col.find_one({'email': email})
         if user and check_password_hash(user['password'], password):
+            # Generate a unique session ID for this specific login event
+            new_session_id = str(uuid.uuid4())
+            
+            # Update the user's database record with this new session ID
+            users_col.update_one(
+                {'_id': user['_id']},
+                {'$set': {'session_id': new_session_id}}
+            )
+            
+            # Set the user and their unique session ID in their cookies
             session['user'] = user['username']
+            session['session_id'] = new_session_id
+            
             response = make_cookie_response({'success': True, 'user': user['username']})
             response.set_cookie('user', user['username'], max_age=3600*24, samesite='Lax') # 1 day
             return response
