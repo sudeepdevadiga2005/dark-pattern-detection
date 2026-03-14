@@ -272,9 +272,16 @@ def reset_password():
 @app.route('/api/logout')
 def logout():
     session.pop('user', None)
+    session.pop('session_id', None)
     response = make_cookie_response({'success': True, 'message': 'Logged out successfully'})
     response.delete_cookie('user')
     return response
+
+@app.route('/api/verify-session')
+@login_required
+def verify_session():
+    # If login_required passes, the session is definitely valid
+    return jsonify({'success': True})
 
 def log_analysis(user, data):
     if analyses_col is None:
