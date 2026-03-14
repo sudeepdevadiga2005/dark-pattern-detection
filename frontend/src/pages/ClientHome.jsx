@@ -17,11 +17,10 @@ const ClientHome = () => {
                 setUser(res.data.user);
                 setIsLoading(false);
             } catch (err) {
-                if (err.response?.status === 401) {
-                    // Session was invalidated (e.g. logged in elsewhere)
-                    Cookies.remove('user');
-                    window.location.href = '/login';
-                }
+                Cookies.remove('user');
+                window.location.href = '/login';
+            } finally {
+                setIsLoading(false);
             }
         };
         verifySession();
