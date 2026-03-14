@@ -188,44 +188,46 @@ def forgot_password():
             {'$set': {'reset_otp': otp, 'reset_otp_expiry': expiry, 'reset_otp_attempts': 0}}
         )
     
-    # Function to send email in the background
-    def send_email_async(smtp_email, smtp_password, recipient_email, otp_code):
-        print(f"DEBUG: Starting background email thread for {recipient_email}...")
+    # Function to send email in the background via Resend HTTPS API
+    def send_email_async(resend_api_key, recipient_email, otp_code):
+        import requests
+        print(f"DEBUG: Starting background email thread for {recipient_email} via Resend API...")
         try:
-            msg = MIMEMultipart()
-            msg['From'] = f"Dark Pattern Detection <{smtp_email}>"
-            msg['To'] = recipient_email
-            msg['Subject'] = 'Your OTP Verification Code'
-            body = f'Your one-time password (OTP) is: {otp_code}. Do not share this code.\n\nIt expires in 120 seconds.'
-            msg.attach(MIMEText(body, 'plain'))
+            url = "https://api.resend.com/emails"
+            headers = {
+                "Authorization": f"Bearer {resend_api_key}",
+                "Content-Type": "application/json"
+            }
+            # Resend's free tier allows sending from onboarding@resend.dev to the email address you verified
+            data = {
+                "from": "Dark Pattern Detection <onboarding@resend.dev>",
+                "to": [recipient_email],
+                "subject": "Your OTP Verification Code",
+                "html": f"<p>Your one-time password (OTP) is: <strong>{otp_code}</strong>. Do not share this code.</p><p>It expires in 120 seconds.</p>"
+            }
             
-            print("DEBUG: Connecting to Gmail SMTP server (smtp.gmail.com:587)...")
-            with smtplib.SMTP("smtp.gmail.com", 587) as server:
-                server.ehlo()
-                context = ssl.create_default_context()
-                server.starttls(context=context)
-                server.ehlo()
-                print("DEBUG: Connected. Attempting to login...")
-                server.login(smtp_email, smtp_password)
-                print("DEBUG: Login successful. Sending email...")
-                server.sendmail(smtp_email, recipient_email, msg.as_string())
-                print(f"DEBUG: Email OTP successfully sent asynchronously to {recipient_email}")
-        except smtplib.SMTPAuthenticationError:
-            print("EMAIL ERROR: Authentication failed. Please check SMTP_EMAIL and SMTP_APP_PASSWORD. Ensure you are using a 16-character App Password, NOT your regular Gmail password.")
+            print("DEBUG: Sending HTTPS request to Resend API...")
+            response = requests.post(url, headers=headers, json=data, timeout=10)
+            
+            if response.status_code in [200, 201]:
+                print(f"DEBUG: Email OTP successfully sent asynchronously via Resend to {recipient_email}")
+            else:
+                print(f"EMAIL ERROR: Resend API returned status {response.status_code}: {response.text}")
+                
         except Exception as e:
             print(f"EMAIL ERROR in background thread: {e}")
+
     # Try sending email
-    smtp_email = os.getenv("SMTP_EMAIL")
-    smtp_password = os.getenv("SMTP_APP_PASSWORD")
+    resend_api_key = os.getenv("RESEND_API_KEY")
     
-    if smtp_email and smtp_password and smtp_email != 'your_email@gmail.com':
+    if resend_api_key:
         try:
             # Start background thread to send email
-            email_thread = threading.Thread(target=send_email_async, args=(smtp_email, smtp_password, email, otp))
+            email_thread = threading.Thread(target=send_email_async, args=(resend_api_key, email, otp))
             # Start the thread normally, not as a daemon, to ensure it finishes connecting even if the API responds first
             email_thread.start()
             
-            return jsonify({'success': True, 'message': 'OTP sent to email'})
+            return jsonify({'success': True, 'message': 'OTP sent to email via HTTPS'})
         except Exception as e:
             print(f"THREAD ERROR: {e}")
             return jsonify({'success': False, 'message': 'Failed to initiate email task.'}), 500
