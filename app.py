@@ -199,14 +199,17 @@ def forgot_password():
             body = f'Your one-time password (OTP) is: {otp_code}. Do not share this code.\n\nIt expires in 120 seconds.'
             msg.attach(MIMEText(body, 'plain'))
             
-            print("DEBUG: Connecting to Gmail SMTP server (smtp.gmail.com:465)...")
-            context = ssl.create_default_context()
-            with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
+            print("DEBUG: Connecting to Gmail SMTP server (smtp.gmail.com:587)...")
+            with smtplib.SMTP("smtp.gmail.com", 587) as server:
+                server.ehlo()
+                context = ssl.create_default_context()
+                server.starttls(context=context)
+                server.ehlo()
                 print("DEBUG: Connected. Attempting to login...")
                 server.login(smtp_email, smtp_password)
                 print("DEBUG: Login successful. Sending email...")
                 server.sendmail(smtp_email, recipient_email, msg.as_string())
-                print(f"DEBUG: Email OTP successfully sent asymptotically to {recipient_email}")
+                print(f"DEBUG: Email OTP successfully sent asynchronously to {recipient_email}")
         except smtplib.SMTPAuthenticationError:
             print("EMAIL ERROR: Authentication failed. Please check SMTP_EMAIL and SMTP_APP_PASSWORD. Ensure you are using a 16-character App Password, NOT your regular Gmail password.")
         except Exception as e:
