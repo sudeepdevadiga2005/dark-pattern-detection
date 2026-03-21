@@ -222,8 +222,9 @@ def forgot_password():
             
         return jsonify({'success': True, 'message': 'OTP sent to your email.'})
     except Exception as e:
-        print(f"EMAIL TASK ERROR: {e}")
-        return jsonify({'success': False, 'message': 'Failed to send OTP email. Please wait or try again later.'}), 500
+        error_details = str(e)
+        print(f"EMAIL TASK ERROR: {error_details}")
+        return jsonify({'success': False, 'message': f'Failed to send OTP email. Reason: {error_details}'}), 500
 
 @app.route('/api/verify-otp', methods=['POST'])
 def verify_otp():
