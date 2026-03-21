@@ -243,11 +243,18 @@ form {
 }
 
 .forgot-pass {
-    font-size: 14px;
+    font-size: 18px;
     color: var(--muted);
     cursor: pointer;
     margin-top: 20px;
     text-decoration: underline;
+    font-weight: 500;
+}
+
+.btn-loading {
+    background-color: var(--rust) !important;
+    cursor: wait !important;
+    opacity: 0.8 !important;
 }
 
 .toggle-btn {

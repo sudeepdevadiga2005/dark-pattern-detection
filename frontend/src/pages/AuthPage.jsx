@@ -11,6 +11,7 @@ const AuthPage = () => {
     const [forgotFlow, setForgotFlow] = useState(false);
     const [forgotPhase, setForgotPhase] = useState('email'); // 'email', 'otp', or 'new_pass'
     const [otpTimer, setOtpTimer] = useState(120);
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
     // Auth Form States
     const [loginData, setLoginData] = useState({ email: '', password: '' });
@@ -97,6 +98,7 @@ const AuthPage = () => {
 
     const handleForgotRequest = async (e) => {
         e.preventDefault();
+        setIsSubmitting(true);
         try {
             const res = await axios.post(`${API_BASE_URL}/forgot-password`, { email: forgotData.email });
             if (res.data.success) {
@@ -106,6 +108,8 @@ const AuthPage = () => {
             }
         } catch (err) {
             setError(err.response?.data?.message || 'Email not found');
+        } finally {
+            setIsSubmitting(false);
         }
     };
 
@@ -275,7 +279,9 @@ const AuthPage = () => {
                                         <label>Email Address</label>
                                         <div className="bar"></div>
                                     </div>
-                                    <button className="btn-main" type="submit">Verify Email →</button>
+                                    <button className={`btn-main ${isSubmitting ? 'btn-loading' : ''}`} type="submit" disabled={isSubmitting}>
+                                        {isSubmitting ? 'Verifying...' : 'Verify Email →'}
+                                    </button>
                                     <span className="forgot-pass" onClick={() => setForgotFlow(false)}>Back to Login</span>
                                 </>
                             )}
