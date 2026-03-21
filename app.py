@@ -183,9 +183,8 @@ def send_gmail_otp(recipient_email, otp_code):
     body = f"<p>Your one-time password (OTP) is: <strong>{otp_code}</strong>. Do not share this code.</p><p>It expires in 120 seconds.</p>"
     msg.attach(MIMEText(body, 'html'))
 
-    # Connect to Gmail's SMTP server with a timeout to prevent worker hangs
-    server = smtplib.SMTP('smtp.gmail.com', 587, timeout=10)
-    server.starttls()
+    # Connect to Gmail's SMTP server using SSL on port 465 (more reliable on cloud hosts)
+    server = smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=10)
     server.login(sender_email, sender_password)
     server.send_message(msg)
     server.quit()
