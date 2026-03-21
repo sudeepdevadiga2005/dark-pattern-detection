@@ -99,6 +99,9 @@ def signup():
         # Use the existing SECRET_KEY from app config as the super_key for MongoDB
         super_key = app.secret_key
         
+        if users_col is None:
+            return jsonify({'success': False, 'message': 'Database connection error. Try again later.'}), 503
+
         if not all([username, email, password, confirm_password]):
             return jsonify({'success': False, 'message': 'All fields are required'}), 400
             
@@ -138,6 +141,9 @@ def signup():
 @app.route('/api/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
+        if users_col is None:
+            return jsonify({'success': False, 'message': 'Database connection error. Try again later.'}), 503
+            
         data = request.get_json()
         email = data.get('email')
         password = data.get('password')
@@ -184,7 +190,8 @@ def send_gmail_otp(recipient_email, otp_code):
     msg.attach(MIMEText(body, 'html'))
 
     # Connect to Gmail's SMTP server using SSL on port 465 (more reliable on cloud hosts)
-    server = smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=10)
+    context = ssl.create_default_context()
+    server = smtplib.SMTP_SSL('smtp.gmail.com', 465, context=context, timeout=10)
     server.login(sender_email, sender_password)
     server.send_message(msg)
     server.quit()
@@ -194,6 +201,9 @@ def send_gmail_otp(recipient_email, otp_code):
 
 @app.route('/api/forgot-password', methods=['POST'])
 def forgot_password():
+    if users_col is None:
+        return jsonify({'success': False, 'message': 'Database connection error. Try again later.'}), 503
+
     data = request.get_json()
     email = data.get('email', '').strip()
     user = users_col.find_one({'email': email})
@@ -224,10 +234,13 @@ def forgot_password():
     except Exception as e:
         error_details = str(e)
         print(f"EMAIL TASK ERROR: {error_details}")
-        return jsonify({'success': False, 'message': f'Failed to send OTP email. Reason: {error_details}'}), 500
+        return jsonify({'success': False, 'message': 'Failed to send OTP.'}), 500
 
 @app.route('/api/verify-otp', methods=['POST'])
 def verify_otp():
+    if users_col is None:
+        return jsonify({'success': False, 'message': 'Database connection error. Try again later.'}), 503
+
     data = request.get_json()
     email = data.get('email')
     otp_input = data.get('otp')
@@ -259,6 +272,9 @@ def verify_otp():
 
 @app.route('/api/reset-password', methods=['POST'])
 def reset_password():
+    if users_col is None:
+        return jsonify({'success': False, 'message': 'Database connection error. Try again later.'}), 503
+
     data = request.get_json()
     email = data.get('email')
     otp_input = data.get('otp')
@@ -365,6 +381,9 @@ def health():
 def dashboard():
     username = session.get('user')
     # Fetch history from MongoDB
+    if analyses_col is None:
+        return jsonify({'user': username, 'history': []})
+        
     history = list(analyses_col.find({'username': username}).sort('timestamp', -1).limit(10))
     # Convert MongoDB objects to JSON-serializable format
     for item in history:
@@ -375,6 +394,9 @@ def dashboard():
 @login_required
 def get_history():
     username = session.get('user')
+    if analyses_col is None:
+        return jsonify([])
+        
     history = list(analyses_col.find({'username': username}).sort('timestamp', -1).limit(10))
     for item in history:
         item['_id'] = str(item['_id'])
@@ -384,7 +406,8 @@ def get_history():
 @login_required
 def clear_user_history():
     username = session.get('user')
-    analyses_col.delete_many({'username': username})
+    if analyses_col is not None:
+        analyses_col.delete_many({'username': username})
     return jsonify({'success': True})
 
 @app.route('/api/analyze-text', methods=['POST'])
