@@ -167,6 +167,30 @@ def make_cookie_response(data):
     from flask import make_response
     return make_response(jsonify(data))
 
+# Configure Gmail SMTP
+def send_gmail_otp(recipient_email, otp_code):
+    sender_email = os.getenv("EMAIL")
+    sender_password = os.getenv("EMAIL_PASS")
+    
+    if not sender_email or not sender_password:
+        raise Exception("SMTP credentials (EMAIL, EMAIL_PASS) checking failed - not configured.")
+
+    msg = MIMEMultipart()
+    msg['From'] = f"Dark Pattern Detection <{sender_email}>"
+    msg['To'] = recipient_email
+    msg['Subject'] = "Your OTP Verification Code"
+
+    body = f"<p>Your one-time password (OTP) is: <strong>{otp_code}</strong>. Do not share this code.</p><p>It expires in 120 seconds.</p>"
+    msg.attach(MIMEText(body, 'html'))
+
+    # Connect to Gmail's SMTP server
+    server = smtplib.SMTP('smtp.gmail.com', 587)
+    server.starttls()
+    server.login(sender_email, sender_password)
+    server.send_message(msg)
+    server.quit()
+    print(f"DEBUG: Email OTP successfully sent via Gmail to {recipient_email}")
+
 # OTP Storage in MongoDB (removes in-memory dictionary that breaks on multi-worker servers)
 
 @app.route('/api/forgot-password', methods=['POST'])
@@ -192,49 +216,13 @@ def forgot_password():
             {'$set': {'reset_otp': otp, 'reset_otp_expiry': expiry, 'reset_otp_attempts': 0}}
         )
     
-    # Function to send email synchronously via Resend HTTPS API
-    def send_email_sync(resend_api_key, recipient_email, otp_code):
-        import requests
-        print(f"DEBUG: Sending email for {recipient_email} via Resend API directly...")
-        try:
-            url = "https://api.resend.com/emails"
-            headers = {
-                "Authorization": f"Bearer {resend_api_key}",
-                "Content-Type": "application/json"
-            }
-            # Resend's free tier allows sending from onboarding@resend.dev to the email address you verified
-            data = {
-                "from": "Dark Pattern Detection <onboarding@resend.dev>",
-                "to": [recipient_email],
-                "subject": "Your OTP Verification Code",
-                "html": f"<p>Your one-time password (OTP) is: <strong>{otp_code}</strong>. Do not share this code.</p><p>It expires in 120 seconds.</p>"
-            }
-            
-            print("DEBUG: Sending HTTPS request to Resend API...")
-            response = requests.post(url, headers=headers, json=data, timeout=10)
-            
-            if response.status_code in [200, 201]:
-                print(f"DEBUG: Email OTP successfully sent via Resend to {recipient_email}")
-            else:
-                print(f"EMAIL ERROR: Resend API returned status {response.status_code}: {response.text}")
-                
-        except Exception as e:
-            print(f"EMAIL ERROR during synchronous send: {e}")
-
-    # Try sending email
-    resend_api_key = os.getenv("RESEND_API_KEY")
-    
-    if resend_api_key:
-        try:
-            send_email_sync(resend_api_key, email, otp)
-            return jsonify({'success': True, 'message': 'OTP sent to your email.'})
-        except Exception as e:
-            print(f"EMAIL TASK ERROR: {e}")
-            return jsonify({'success': False, 'message': 'Failed to send OTP email.'}), 500
-    else:
-        # Fallback to demo mode if no email configured
-        print(f"DEBUG: OTP for {email} is {otp}")
-        return jsonify({'success': True, 'message': 'OTP generated (Email not configured, check console)', 'debug_otp': otp})
+    # Try sending email using Gmail SMTP
+    try:
+        send_gmail_otp(email, otp)
+        return jsonify({'success': True, 'message': 'OTP sent to your email.'})
+    except Exception as e:
+        print(f"EMAIL TASK ERROR: {e}")
+        return jsonify({'success': False, 'message': 'Failed to send OTP email.'}), 500
 
 @app.route('/api/verify-otp', methods=['POST'])
 def verify_otp():
