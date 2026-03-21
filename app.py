@@ -169,11 +169,11 @@ def make_cookie_response(data):
 
 # Configure Gmail SMTP
 def send_gmail_otp(recipient_email, otp_code):
-    sender_email = os.getenv("EMAIL")
-    sender_password = os.getenv("EMAIL_PASS")
+    sender_email = os.getenv("SMTP_EMAIL")
+    sender_password = os.getenv("SMTP_APP_PASSWORD")
     
     if not sender_email or not sender_password:
-        raise Exception("SMTP credentials (EMAIL, EMAIL_PASS) checking failed - not configured.")
+        raise Exception("SMTP credentials (SMTP_EMAIL, SMTP_APP_PASSWORD) checking failed - not configured.")
 
     msg = MIMEMultipart()
     msg['From'] = f"Dark Pattern Detection <{sender_email}>"
