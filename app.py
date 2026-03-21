@@ -10,17 +10,15 @@ from pymongo import MongoClient
 from dotenv import load_dotenv
 import random
 import time
-import smtplib
-import ssl
 import uuid
 import threading
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import resend
 
 
 # Load environment variables
 load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI")
+resend.api_key = os.getenv("RESEND_API_KEY")
 
 # Configure folders for serving React
 dist_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'frontend', 'dist')
@@ -173,29 +171,24 @@ def make_cookie_response(data):
     from flask import make_response
     return make_response(jsonify(data))
 
-# Configure Gmail SMTP
-def send_gmail_otp(recipient_email, otp_code):
-    sender_email = os.getenv("SMTP_EMAIL")
-    sender_password = os.getenv("SMTP_APP_PASSWORD")
+# Configure Resend Email
+def send_otp_email(recipient_email, otp_code):
+    sender_email = "onboarding@resend.dev"
     
-    if not sender_email or not sender_password:
-        raise Exception("SMTP credentials (SMTP_EMAIL, SMTP_APP_PASSWORD) checking failed - not configured.")
-
-    msg = MIMEMultipart()
-    msg['From'] = f"Dark Pattern Detection <{sender_email}>"
-    msg['To'] = recipient_email
-    msg['Subject'] = "Your OTP Verification Code"
+    if not resend.api_key:
+        raise Exception("Resend API key is not configured. Please set RESEND_API_KEY in Render.")
 
     body = f"<p>Your one-time password (OTP) is: <strong>{otp_code}</strong>. Do not share this code.</p><p>It expires in 120 seconds.</p>"
-    msg.attach(MIMEText(body, 'html'))
 
-    # Connect to Gmail's SMTP server using SSL on port 465 (more reliable on cloud hosts)
-    context = ssl.create_default_context()
-    server = smtplib.SMTP_SSL('smtp.gmail.com', 465, context=context, timeout=10)
-    server.login(sender_email, sender_password)
-    server.send_message(msg)
-    server.quit()
-    print(f"DEBUG: Email OTP successfully sent via Gmail to {recipient_email}")
+    params = {
+        "from": f"Dark Pattern Detection <{sender_email}>",
+        "to": [recipient_email],
+        "subject": "Your OTP Verification Code",
+        "html": body,
+    }
+    
+    response = resend.Emails.send(params)
+    print(f"DEBUG: Email OTP successfully sent via Resend to {recipient_email}. Response: {response}")
 
 # OTP Storage in MongoDB (removes in-memory dictionary that breaks on multi-worker servers)
 
@@ -219,9 +212,9 @@ def forgot_password():
     otp = "".join([str(random.randint(0, 9)) for _ in range(6)])
     expiry = time.time() + 120 # 2 minutes expiry
     
-    # Try sending email using Gmail SMTP
+    # Try sending email using Resend
     try:
-        send_gmail_otp(email, otp)
+        send_otp_email(email, otp)
         
         # Save OTP to MongoDB ONLY after successful email delivery
         if users_col is not None:

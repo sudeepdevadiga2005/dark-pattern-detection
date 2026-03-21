@@ -8,3 +8,4 @@ pandas==2.2.1
 scikit-learn==1.8.0
 duckduckgo-search>=6.2.1
 gunicorn==21.2.0
+resend
