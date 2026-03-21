@@ -178,6 +178,10 @@ def forgot_password():
     if not user:
         return jsonify({'success': False, 'message': 'Email not found'}), 404
         
+    if 'reset_otp_expiry' in user and time.time() < user.get('reset_otp_expiry', 0):
+        remaining_time = int(user.get('reset_otp_expiry', 0) - time.time())
+        return jsonify({'success': False, 'message': f'Please wait {remaining_time} seconds before requesting a new OTP.'}), 429
+        
     otp = "".join([str(random.randint(0, 9)) for _ in range(6)])
     expiry = time.time() + 120 # 2 minutes expiry
     
@@ -188,10 +192,10 @@ def forgot_password():
             {'$set': {'reset_otp': otp, 'reset_otp_expiry': expiry, 'reset_otp_attempts': 0}}
         )
     
-    # Function to send email in the background via Resend HTTPS API
-    def send_email_async(resend_api_key, recipient_email, otp_code):
+    # Function to send email synchronously via Resend HTTPS API
+    def send_email_sync(resend_api_key, recipient_email, otp_code):
         import requests
-        print(f"DEBUG: Starting background email thread for {recipient_email} via Resend API...")
+        print(f"DEBUG: Sending email for {recipient_email} via Resend API directly...")
         try:
             url = "https://api.resend.com/emails"
             headers = {
@@ -210,27 +214,23 @@ def forgot_password():
             response = requests.post(url, headers=headers, json=data, timeout=10)
             
             if response.status_code in [200, 201]:
-                print(f"DEBUG: Email OTP successfully sent asynchronously via Resend to {recipient_email}")
+                print(f"DEBUG: Email OTP successfully sent via Resend to {recipient_email}")
             else:
                 print(f"EMAIL ERROR: Resend API returned status {response.status_code}: {response.text}")
                 
         except Exception as e:
-            print(f"EMAIL ERROR in background thread: {e}")
+            print(f"EMAIL ERROR during synchronous send: {e}")
 
     # Try sending email
     resend_api_key = os.getenv("RESEND_API_KEY")
     
     if resend_api_key:
         try:
-            # Start background thread to send email
-            email_thread = threading.Thread(target=send_email_async, args=(resend_api_key, email, otp))
-            # Start the thread normally, not as a daemon, to ensure it finishes connecting even if the API responds first
-            email_thread.start()
-            
-            return jsonify({'success': True, 'message': 'OTP sent to email via HTTPS'})
+            send_email_sync(resend_api_key, email, otp)
+            return jsonify({'success': True, 'message': 'OTP sent to your email.'})
         except Exception as e:
-            print(f"THREAD ERROR: {e}")
-            return jsonify({'success': False, 'message': 'Failed to initiate email task.'}), 500
+            print(f"EMAIL TASK ERROR: {e}")
+            return jsonify({'success': False, 'message': 'Failed to send OTP email.'}), 500
     else:
         # Fallback to demo mode if no email configured
         print(f"DEBUG: OTP for {email} is {otp}")
