@@ -183,8 +183,8 @@ def send_gmail_otp(recipient_email, otp_code):
     body = f"<p>Your one-time password (OTP) is: <strong>{otp_code}</strong>. Do not share this code.</p><p>It expires in 120 seconds.</p>"
     msg.attach(MIMEText(body, 'html'))
 
-    # Connect to Gmail's SMTP server
-    server = smtplib.SMTP('smtp.gmail.com', 587)
+    # Connect to Gmail's SMTP server with a timeout to prevent worker hangs
+    server = smtplib.SMTP('smtp.gmail.com', 587, timeout=10)
     server.starttls()
     server.login(sender_email, sender_password)
     server.send_message(msg)
@@ -206,23 +206,25 @@ def forgot_password():
         remaining_time = int(user.get('reset_otp_expiry', 0) - time.time())
         return jsonify({'success': False, 'message': f'Please wait {remaining_time} seconds before requesting a new OTP.'}), 429
         
+    # Generate new OTP
     otp = "".join([str(random.randint(0, 9)) for _ in range(6)])
     expiry = time.time() + 120 # 2 minutes expiry
-    
-    # Save OTP to MongoDB directly inside the user's document
-    if users_col is not None:
-        users_col.update_one(
-            {'_id': user['_id']},
-            {'$set': {'reset_otp': otp, 'reset_otp_expiry': expiry, 'reset_otp_attempts': 0}}
-        )
     
     # Try sending email using Gmail SMTP
     try:
         send_gmail_otp(email, otp)
+        
+        # Save OTP to MongoDB ONLY after successful email delivery
+        if users_col is not None:
+            users_col.update_one(
+                {'_id': user['_id']},
+                {'$set': {'reset_otp': otp, 'reset_otp_expiry': expiry, 'reset_otp_attempts': 0}}
+            )
+            
         return jsonify({'success': True, 'message': 'OTP sent to your email.'})
     except Exception as e:
         print(f"EMAIL TASK ERROR: {e}")
-        return jsonify({'success': False, 'message': 'Failed to send OTP email.'}), 500
+        return jsonify({'success': False, 'message': 'Failed to send OTP email. Please wait or try again later.'}), 500
 
 @app.route('/api/verify-otp', methods=['POST'])
 def verify_otp():
