@@ -8,6 +8,8 @@ import AuthPage from './pages/AuthPage';
 import Dashboard from './pages/Dashboard';
 import Analyze from './pages/Analyze';
 import WebScraper from './pages/WebScraper';
+import AdminDashboard from './pages/AdminDashboard';
+import AdminLogin from './pages/AdminLogin';
 import Cookies from 'js-cookie';
 import './App.css';
 
@@ -16,10 +18,11 @@ axios.defaults.withCredentials = true;
 
 function App() {
   const isLoggedIn = !!Cookies.get('user');
+  const isAdmin = !!Cookies.get('is_admin');
 
   // Continually verify session state if we think we are logged in
   useEffect(() => {
-    if (!isLoggedIn) return;
+    if (!isLoggedIn && !isAdmin) return;
 
     const interval = setInterval(async () => {
       try {
@@ -28,13 +31,18 @@ function App() {
         if (err.response?.status === 401) {
           // The backend says we are no longer valid (e.g. logged in on another device)
           Cookies.remove('user');
-          window.location.href = '/login'; // Instantly force the user out to the login page
+          Cookies.remove('is_admin');
+          if (window.location.pathname.startsWith('/admin')) {
+            window.location.href = '/admin/login';
+          } else {
+            window.location.href = '/login';
+          }
         }
       }
-    }, 5000); // Check every 5 seconds
+    }, 60000); // Check once per minute to reduce terminal noise
 
     return () => clearInterval(interval);
-  }, [isLoggedIn]);
+  }, [isLoggedIn, isAdmin]);
 
   return (
     <Router>
@@ -45,6 +53,11 @@ function App() {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/analyze" element={<Analyze />} />
         <Route path="/scraper" element={<WebScraper />} />
+        <Route path="/admin/login" element={<AdminLogin />} />
+        <Route 
+          path="/admin" 
+          element={isAdmin ? <AdminDashboard /> : <AdminLogin />} 
+        />
       </Routes>
     </Router>
   );

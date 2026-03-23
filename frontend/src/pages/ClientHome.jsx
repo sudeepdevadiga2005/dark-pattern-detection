@@ -37,65 +37,120 @@ const ClientHome = () => {
         }
     };
 
+    const [viewState, setViewState] = useState('portal'); // 'portal' or 'dashboard'
+    const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+
+    useEffect(() => {
+        const handleMouseMove = (e) => {
+            setMousePos({ x: e.clientX, y: e.clientY });
+        };
+        window.addEventListener('mousemove', handleMouseMove);
+        return () => window.removeEventListener('mousemove', handleMouseMove);
+    }, []);
+
     if (isLoading) {
-        return <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0e0d0b', color: '#fff' }}>Verifying Identity...</div>;
+        return <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff', color: '#000' }}>Verifying Identity...</div>;
     }
+
     return (
-        <div className="client-home-wrapper">
-            <div className="bg-canvas">
-                <div className="orb orb-1"></div>
-                <div className="orb orb-2"></div>
+        <div className={`client-portal-wrapper ${viewState}`}>
+            {/* Interactive Mouse-Following Background */}
+            <div 
+                className="neural-canvas" 
+                style={{ 
+                    '--m-x': `${mousePos.x}px`, 
+                    '--m-y': `${mousePos.y}px` 
+                }}
+            >
+                <div className="neural-orb orb-1"></div>
+                <div className="neural-orb orb-2"></div>
+                <div className="grain-overlay"></div>
             </div>
 
-            <nav className="client-nav">
+            <nav className="portal-mini-nav fade-in">
                 <div className="brand">
-                    <div className="brand-mark">D</div>
-                    <span className="brand-name">Aegis: The Dark-Pattern Detector</span>
+                    <div className="brand-logo">D</div>
+                    {viewState === 'dashboard' && <span className="brand-label">AEGIS</span>}
                 </div>
-                <div className="nav-actions">
-                    <span className="user-welcome">Welcome, <strong>{user}</strong></span>
-                    <button className="logout-pill" onClick={handleLogout}>Logout</button>
-                </div>
+                <button className="btn-exit" onClick={handleLogout}>Sign Out</button>
             </nav>
 
-            <main className="client-main">
-                <header className="client-header fade-in">
-                    <h1>Enterprise Security <em>Console</em></h1>
-                    <p>Access your personalized neural protection tools and historical archives.</p>
-                </header>
+            {/* PHASE 1: INITIAL PORTAL VIEW */}
+            {viewState === 'portal' && (
+                <div className="portal-landing fade-in">
+                    <header className="portal-header">
+                        <span className="security-tag">NEURAL PROTECTION ACTIVE</span>
+                        <h1>Aegis <em>Secure</em> Console</h1>
+                        <p>Welcome back, <strong>{user}</strong>. Establish a connection to begin.</p>
+                    </header>
+                    
+                    <div className="portal-actions">
+                        <Link to="/analyze" className="portal-btn primary-portal">
+                            <div className="portal-icon">⚡</div>
+                            <div className="portal-text">
+                                <h3>Start Scan Website</h3>
+                                <p>Launch the deep neural analyzer instantly.</p>
+                            </div>
+                        </Link>
 
-                <div className="tools-grid fade-in">
-                    <div className="tool-card main-tool">
-                        <div className="tool-content">
-                            <span className="tag">Primary Engine</span>
-                            <h3>Deep Pattern Analyzer</h3>
-                            <p>Verify e-commerce links and message fragments using our 15+ category ML model.</p>
-                            <Link to="/analyze" className="btn-launch">Launch Tool →</Link>
-                        </div>
-                        <div className="tool-icon">🔍</div>
-                    </div>
-
-                    <div className="tool-card">
-                        <div className="tool-content">
-                            <span className="tag">Archive</span>
-                            <h3>Audit History</h3>
-                            <p>Review your last 10 security reports and trust scores.</p>
-                            <Link to="/dashboard" className="btn-link">Open Vault</Link>
-                        </div>
-                        <div className="tool-icon">🕒</div>
-                    </div>
-
-                    <div className="tool-card">
-                        <div className="tool-content">
-                            <span className="tag">Identity</span>
-                            <h3>Profile Settings</h3>
-                            <p>Review your security profile and manage your account details.</p>
-                            <Link to="/dashboard?view=account" className="btn-link">Account Settings</Link>
-                        </div>
-                        <div className="tool-icon">👤</div>
+                        <Link to="/dashboard" className="portal-btn">
+                            <div className="portal-icon">🗄️</div>
+                            <div className="portal-text">
+                                <h3>Open Neural Archive</h3>
+                                <p>Access historical patterns and reports.</p>
+                            </div>
+                        </Link>
                     </div>
                 </div>
-            </main>
+            )}
+
+            {/* PHASE 2: DASHBOARD VIEW (Toolkit on the left) */}
+            {viewState === 'dashboard' && (
+                <div className="dashboard-layout fade-in">
+                    <div className="dashboard-sidebar">
+                        <div className="sidebar-header">
+                            <span className="tag-micro">TOOLKIT</span>
+                            <h2>Active Modules</h2>
+                        </div>
+                        
+                        <div className="sidebar-options">
+                            <Link to="/analyze" className="side-option stagger-1">
+                                <div className="opt-icon">🔍</div>
+                                <div className="opt-text">
+                                    <h3>Deep Pattern Analyzer</h3>
+                                    <p>Scan links and text patterns.</p>
+                                </div>
+                            </Link>
+
+                            <Link to="/dashboard" className="side-option stagger-2">
+                                <div className="opt-icon">🕒</div>
+                                <div className="opt-text">
+                                    <h3>Audit History</h3>
+                                    <p>Review last 10 reports.</p>
+                                </div>
+                            </Link>
+
+                            <Link to="/dashboard?view=account" className="side-option stagger-3">
+                                <div className="opt-icon">👤</div>
+                                <div className="opt-text">
+                                    <h3>Security Profile</h3>
+                                    <p>Account & password settings.</p>
+                                </div>
+                            </Link>
+                        </div>
+
+                        <button className="btn-back" onClick={() => setViewState('portal')}>← Back to Portals</button>
+                    </div>
+
+                    <div className="dashboard-main-preview stagger-4">
+                        <div className="preview-content">
+                            <div className="shield-icon">🛡️</div>
+                            <h1>Aegis is <em>Live.</em></h1>
+                            <p>Select a module from the sidebar to start your security verification sequence.</p>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };

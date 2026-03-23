@@ -376,6 +376,10 @@ form {
         top: 14px;
     }
 
+    .toggle-btn {
+        top: 14px;
+    }
+
     .btn-main {
         font-size: 18px;
         padding: 18px;

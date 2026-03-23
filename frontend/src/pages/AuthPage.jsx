@@ -20,6 +20,19 @@ const AuthPage = () => {
 
     const [error, setError] = useState('');
     const [showPassword, setShowPassword] = useState({ login: false, signup: false, confirm: false, reset: false });
+    const [windowFocused, setWindowFocused] = useState(true);
+
+    // Track window focus for Anti-Screenshot protection
+    useEffect(() => {
+        const handleFocus = () => setWindowFocused(true);
+        const handleBlur = () => setWindowFocused(false);
+        window.addEventListener('focus', handleFocus);
+        window.addEventListener('blur', handleBlur);
+        return () => {
+            window.removeEventListener('focus', handleFocus);
+            window.removeEventListener('blur', handleBlur);
+        };
+    }, []);
 
     // Check if already logged in on mount
     useEffect(() => {
@@ -50,12 +63,9 @@ const AuthPage = () => {
         return () => clearInterval(interval);
     }, [forgotPhase, otpTimer]);
 
-    // Handle password visibility toggle with 5-sec auto-hide
+    // Handle password visibility toggle
     const togglePassword = (field) => {
-        setShowPassword(prev => ({ ...prev, [field]: true }));
-        setTimeout(() => {
-            setShowPassword(prev => ({ ...prev, [field]: false }));
-        }, 5000);
+        setShowPassword(prev => ({ ...prev, [field]: !prev[field] }));
     };
 
     const togglePanel = (active) => {
@@ -203,7 +213,9 @@ const AuthPage = () => {
                                 onChange={e => setSignupData({ ...signupData, password: e.target.value })}
                             />
                             <label>Password</label>
-                            <span className="toggle-btn" onClick={() => togglePassword('signup')}>👁️</span>
+                            <span className="toggle-btn" onClick={() => togglePassword('signup')}>
+                                {showPassword.signup ? "🙈" : "👁️"}
+                            </span>
                             <div className="bar"></div>
                         </div>
                         <div className="field-group">
@@ -216,7 +228,9 @@ const AuthPage = () => {
                                 onChange={e => setSignupData({ ...signupData, confirm_password: e.target.value })}
                             />
                             <label>Confirm Password</label>
-                            <span className="toggle-btn" onClick={() => togglePassword('confirm')}>👁️</span>
+                            <span className="toggle-btn" onClick={() => togglePassword('confirm')}>
+                                {showPassword.confirm ? "🙈" : "👁️"}
+                            </span>
                             <div className="bar"></div>
                         </div>
                         <button className="btn-main" type="submit">Complete Registration</button>
@@ -244,6 +258,7 @@ const AuthPage = () => {
                         <div className="field-group">
                             <input
                                 type={showPassword.login ? "text" : "password"}
+                                className={showPassword.login && !windowFocused ? 'security-blur-inactive' : ''}
                                 name="login-password"
                                 autoComplete="off"
                                 placeholder=" " required
@@ -251,7 +266,9 @@ const AuthPage = () => {
                                 onChange={e => setLoginData({ ...loginData, password: e.target.value })}
                             />
                             <label>Password</label>
-                            <span className="toggle-btn" onClick={() => togglePassword('login')}>👁️</span>
+                            <span className="toggle-btn" onClick={() => togglePassword('login')}>
+                                {showPassword.login ? "🙈" : "👁️"}
+                            </span>
                             <div className="bar"></div>
                         </div>
                         <span className="forgot-pass" onClick={() => setForgotFlow(true)}>Forgotten your password?</span>
@@ -322,7 +339,9 @@ const AuthPage = () => {
                                             onChange={e => setForgotData({ ...forgotData, new_password: e.target.value })}
                                         />
                                         <label>New Password</label>
-                                        <span className="toggle-btn" onClick={() => togglePassword('reset')}>👁️</span>
+                                        <span className="toggle-btn" onClick={() => togglePassword('reset')}>
+                                            {showPassword.reset ? "🙈" : "👁️"}
+                                        </span>
                                         <div className="bar"></div>
                                     </div>
                                     <button className="btn-main" type="submit">Update Password →</button>

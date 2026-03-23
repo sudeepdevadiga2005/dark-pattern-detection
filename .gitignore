@@ -14,8 +14,23 @@ user_backups.csv
 
 # Ignore Local Test Outputs / Temporary files
 test_out.txt
-# dataset (1).tsv
 test_ddgs.py
 test_domain_verifier.py
 test_native_ddg.py
+test_tiny.py
+debug_output.txt
+debug_typo.py
+
+# Ignore security sensitive setup scripts
+create_admin.py
+promote_admin.py
+
+# Ignore executables and large data files
+ngrok.exe
+dark_pattern_model.pkl
+training_data.tsv
+valid_domains.csv
+valid_domain/
+
+# Ignore Chrome Extension
 chrome_extension/

@@ -1,4 +1,23 @@
-/* Global App resets */
-#root {
+/* Global Security & Anti-Copy Protection */
+html, body, #root {
   width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  /* Prevents text selection globally to protect content */
+  user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
+}
+
+/* Specific allowed selection for inputs only */
+input, textarea {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
+/* Anti-Screenshot Blur: Blurs the password in "Seen Mode" if the window is inactive */
+.security-blur-inactive {
+  filter: blur(12px) !important;
+  transition: filter 0.2s ease;
 }

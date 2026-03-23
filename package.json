@@ -3,9 +3,13 @@
   "version": "2.0.0",
   "description": "Integrated Dark Pattern Detection System",
   "scripts": {
-    "start": "concurrently \"py app.py\" \"cd frontend && npm run dev\"",
+    "prestart": "powershell -Command \"Get-Process python, ngrok -ErrorAction SilentlyContinue | Stop-Process -Force; exit 0\"",
+    "start": "py launcher.py",
     "backend": "py app.py",
-    "frontend": "cd frontend && npm run dev"
+    "frontend": "cd frontend && npm run dev",
+    "tunnel": "powershell -Command \"Start-Sleep -s 8; .\\ngrok.exe http 5000 --log stdout\"",
+    "dev-client": "npx concurrently -n BACKEND,FRONTEND,TUNNEL -c magenta,cyan,green --kill-others \"npm run backend\" \"npm run frontend\" \"npm run tunnel\"",
+    "dev-admin": "npx concurrently -n BACKEND,FRONTEND -c magenta,cyan --kill-others \"npm run backend\" \"npm run frontend\""
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
