@@ -37,9 +37,11 @@ app.secret_key = os.getenv("APP_SESSION_KEY", "default-secret-key-keep-it-safe")
 CORS(app, supports_credentials=True, origins=["*"])
 
 # Session Configuration
+# SameSite=Lax works correctly for same-origin requests (Vite proxy or production).
+# SameSite=None requires Secure=True which only works on HTTPS, not localhost HTTP.
 app.config.update(
-    SESSION_COOKIE_SAMESITE='Lax', 
-    SESSION_COOKIE_SECURE=False,   # Set to False for local development over HTTP
+    SESSION_COOKIE_SAMESITE='Lax',
+    SESSION_COOKIE_SECURE=False,
     SESSION_COOKIE_HTTPONLY=True,
     PERMANENT_SESSION_LIFETIME=datetime.timedelta(days=7)
 )
@@ -85,7 +87,8 @@ def login_required(f):
             
         # Verify if the current session_id matches the one in the database
         if users_col is not None:
-            user = users_col.find_one({'username': session['user']})
+            lookup_query = {'email': session['email']} if 'email' in session else {'username': session['user']}
+            user = users_col.find_one(lookup_query)
             if not user or user.get('session_id') != session['session_id']:
                 # The session_id in DB is different (meaning they logged in elsewhere)
                 session.clear()
@@ -156,6 +159,11 @@ def login():
         password = data.get('password')
         
         user = users_col.find_one({'email': email})
+        
+        # Strictly prevent administrators from logging into the standard client portal
+        if user and user.get('is_admin', False):
+            return jsonify({'success': False, 'message': 'Admin accounts must use the Administrative Security Gateway.'}), 403
+            
         if user and check_password_hash(user['password'], password):
             # Generate a unique session ID for this specific login event
             new_session_id = str(uuid.uuid4())
@@ -169,6 +177,7 @@ def login():
             # Set the user and their unique session ID in their cookies
             session.permanent = True  # Make the cookie survive server restarts
             session['user'] = user['username']
+            session['email'] = user['email']
             session['session_id'] = new_session_id
             
             response = make_cookie_response({'success': True, 'user': user['username']})
@@ -316,7 +325,10 @@ def reset_password():
 @app.route('/api/logout')
 def logout():
     session.pop('user', None)
+    session.pop('email', None)
     session.pop('session_id', None)
+    session.pop('is_admin', None)
+    session.pop('admin_user', None)
     response = make_cookie_response({'success': True, 'message': 'Logged out successfully'})
     response.delete_cookie('user')
     return response
@@ -388,7 +400,7 @@ def detect_device():
 
 @app.route('/api/health')
 def health():
-    return jsonify({'status': 'ONLINE', 'database': 'CONNECTED' if db else 'OFFLINE'})
+    return jsonify({'status': 'ONLINE', 'database': 'CONNECTED' if db is not None else 'OFFLINE'})
 
 @app.route('/api/dashboard')
 @login_required

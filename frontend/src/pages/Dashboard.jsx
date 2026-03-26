@@ -33,14 +33,14 @@ const Dashboard = () => {
         try {
             const res = await axios.get(`${API_BASE_URL}/dashboard`);
             const data = res.data.history || [];
-            setUser(res.data.user);
+            setUser(res.data.user || '');
             setHistory(data);
 
             // Calculate Stats
             setStats({
                 total: data.length,
-                safe: data.filter(h => h.safety_status === 'Safe' || h.safety_status.includes('SAFE')).length,
-                unsafe: data.filter(h => h.safety_status !== 'Safe' && !h.safety_status.includes('SAFE')).length
+                safe: data.filter(h => h.safety_status === 'Safe' || (h.safety_status && h.safety_status.includes('SAFE'))).length,
+                unsafe: data.filter(h => h.safety_status !== 'Safe' && (!h.safety_status || !h.safety_status.includes('SAFE'))).length
             });
 
             setFetching(false);
@@ -64,8 +64,8 @@ const Dashboard = () => {
     };
 
     const filteredHistory = history.filter(item => {
-        if (view === 'safe') return item.safety_status === 'Safe' || item.safety_status.includes('SAFE');
-        if (view === 'unsafe') return item.safety_status !== 'Safe' && !item.safety_status.includes('SAFE');
+        if (view === 'safe') return item.safety_status === 'Safe' || (item.safety_status && item.safety_status.includes('SAFE'));
+        if (view === 'unsafe') return item.safety_status !== 'Safe' && (!item.safety_status || !item.safety_status.includes('SAFE'));
         return true;
     });
 
@@ -129,10 +129,6 @@ const Dashboard = () => {
                         <span className="icon">👤</span>
                         Account Settings
                     </button>
-                    <Link to="/scraper" className="nav-btn" style={{ textDecoration: 'none' }}>
-                        <span className="icon">🌐</span>
-                        Web Scraper
-                    </Link>
                 </div>
 
                 <div className="sidebar-footer">
@@ -286,11 +282,11 @@ const Dashboard = () => {
                                     {filteredHistory.map((item, idx) => (
                                         <tr key={idx} className="audit-row">
                                             <td>
-                                                <div className={`audit-badge ${item.safety_status === 'Safe' || item.safety_status.includes('SAFE') ? 'safe' : 'unsafe'} `}>
-                                                    {item.safety_status}
+                                                <div className={`audit-badge ${item.safety_status === 'Safe' || (item.safety_status && item.safety_status.includes('SAFE')) ? 'safe' : 'unsafe'} `}>
+                                                    {item.safety_status || 'Unknown'}
                                                 </div>
                                             </td>
-                                            <td><span className="method-tag">{item.type.toUpperCase()}</span></td>
+                                            <td><span className="method-tag">{(item.type || 'unknown').toUpperCase()}</span></td>
                                             <td className="target-cell">{item.url !== 'N/A' ? item.url : 'Fragment Analysis'}</td>
                                             <td>
                                                 <div className="trust-cell">
