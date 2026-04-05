@@ -196,6 +196,34 @@
     transform: scale(1.03);
 }
 
+.btn-clear-history {
+    background: rgba(245, 101, 101, 0.1);
+    color: #f56565;
+    border: 1px solid rgba(245, 101, 101, 0.2);
+    padding: 14px 24px;
+    border-radius: 40px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: 0.3s;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-right: 15px;
+}
+
+.btn-clear-history:hover {
+    background: #f56565;
+    color: #fff;
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(245, 101, 101, 0.3);
+}
+
+.header-actions {
+    display: flex;
+    align-items: center;
+}
+
 /* Account View Styling */
 .account-view {
     max-width: 800px;

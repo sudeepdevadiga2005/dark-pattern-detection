@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './Auth.css';
 import axios from 'axios';
+import Cookies from 'js-cookie';
 import API_BASE_URL from '../config';
 
 // Ensure cookies are sent with every request
@@ -12,6 +13,10 @@ const AuthPage = () => {
     const [forgotPhase, setForgotPhase] = useState('email'); // 'email', 'otp', or 'new_pass'
     const [otpTimer, setOtpTimer] = useState(120);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    
+    // Mobile Flow States
+    const [isMobile, setIsMobile] = useState(window.innerWidth <= 1024);
+    const [mobileScreen, setMobileScreen] = useState('intro'); // 'intro', 'login', 'signup'
 
     // Auth Form States
     const [loginData, setLoginData] = useState({ email: '', password: '' });
@@ -22,15 +27,19 @@ const AuthPage = () => {
     const [showPassword, setShowPassword] = useState({ login: false, signup: false, confirm: false, reset: false });
     const [windowFocused, setWindowFocused] = useState(true);
 
-    // Track window focus for Anti-Screenshot protection
+    // Track window focus for Anti-Screenshot protection & generic resize
     useEffect(() => {
         const handleFocus = () => setWindowFocused(true);
         const handleBlur = () => setWindowFocused(false);
+        const handleResize = () => setIsMobile(window.innerWidth <= 1024);
+        
         window.addEventListener('focus', handleFocus);
         window.addEventListener('blur', handleBlur);
+        window.addEventListener('resize', handleResize);
         return () => {
             window.removeEventListener('focus', handleFocus);
             window.removeEventListener('blur', handleBlur);
+            window.removeEventListener('resize', handleResize);
         };
     }, []);
 
@@ -41,6 +50,7 @@ const AuthPage = () => {
                 const res = await axios.get(`${API_BASE_URL}/dashboard`);
                 if (res.data.user) {
                     console.log("User already logged in, redirecting...");
+                    Cookies.set('user', res.data.user, { expires: 7, sameSite: 'Lax', path: '/' });
                     window.location.href = window.location.origin + '/';
                 }
             } catch (err) {
@@ -63,13 +73,13 @@ const AuthPage = () => {
         return () => clearInterval(interval);
     }, [forgotPhase, otpTimer]);
 
-    // Handle password visibility toggle
     const togglePassword = (field) => {
         setShowPassword(prev => ({ ...prev, [field]: !prev[field] }));
     };
 
     const togglePanel = (active) => {
         setIsRightPanelActive(active);
+        setMobileScreen(active ? 'signup' : 'login');
         setError('');
     };
 
@@ -80,6 +90,7 @@ const AuthPage = () => {
             const res = await axios.post(`${API_BASE_URL}/login`, loginData);
             console.log("Login Success:", res.data);
             if (res.data.success) {
+                Cookies.set('user', res.data.user, { expires: 7, sameSite: 'Lax', path: '/' });
                 window.location.href = window.location.origin + '/';
             }
         } catch (err) {
@@ -174,20 +185,42 @@ const AuthPage = () => {
     };
 
     return (
-        <div className="auth-wrapper">
+        <div className={`auth-wrapper ${isMobile ? 'is-mobile-view' : ''} mobile-state-${mobileScreen}`}>
             <div className="bg-canvas">
                 <div className="orb orb-1"></div>
                 <div className="orb orb-2"></div>
             </div>
 
-            <div className={`auth-card ${isRightPanelActive ? 'right-panel-active' : ''}`} id="authCard">
+            {/* Mobile Intro Screen (Reference Pic Flow) */}
+            {isMobile && mobileScreen === 'intro' && (
+                <div className="mobile-intro-screen fade-in">
+                    <div className="pic-container">
+                        <img src="/images/auth_illustration.png" alt="Welcome" />
+                    </div>
+                    <div className="intro-actions">
+                        <button className="btn-mobile-solid" onClick={() => togglePanel(false)}>Login</button>
+                        <button className="btn-mobile-outline" onClick={() => togglePanel(true)}>Register</button>
+                        <span className="btn-mobile-guest" onClick={() => window.location.href='/'}>Continue as a guest</span>
+                    </div>
+                </div>
+            )}
+
+            <div className={`auth-card ${isRightPanelActive ? 'right-panel-active' : ''}`} id="authCard" style={{ display: (isMobile && mobileScreen === 'intro') ? 'none' : 'block' }}>
+                
+                {/* Mobile Back Button */}
+                {isMobile && mobileScreen !== 'intro' && (
+                    <div className="mobile-back-nav" onClick={() => setMobileScreen('intro')}>
+                        <span className="back-icon">←</span>
+                    </div>
+                )}
+
                 {/* Signup Form */}
-                <div className="form-container sign-up-container">
+                <div className="form-container sign-up-container" style={{ display: isMobile && mobileScreen !== 'signup' ? 'none' : 'block' }}>
                     <form onSubmit={handleSignup}>
-                        <h2 className="form-title">Create Account</h2>
+                        <h2 className="form-title">{isMobile ? "Hello! Register to get started" : "Create Account"}</h2>
                         {error && <div className="error-msg error-visible">{error}</div>}
                         <div className="field-group">
-                            <input type="text" placeholder=" " required value={signupData.username} onChange={e => setSignupData({ ...signupData, username: e.target.value })} />
+                            <input type="text" placeholder={isMobile ? "Enter your username" : " "} required value={signupData.username} onChange={e => setSignupData({ ...signupData, username: e.target.value })} />
                             <label>Username</label>
                             <div className="bar"></div>
                         </div>
@@ -196,7 +229,7 @@ const AuthPage = () => {
                                 type="email"
                                 name="email"
                                 autoComplete="email"
-                                placeholder=" " required
+                                placeholder={isMobile ? "Enter your email" : " "} required
                                 value={signupData.email}
                                 onChange={e => setSignupData({ ...signupData, email: e.target.value })}
                             />
@@ -208,7 +241,7 @@ const AuthPage = () => {
                                 type={showPassword.signup ? "text" : "password"}
                                 name="signup-password"
                                 autoComplete="new-password"
-                                placeholder=" " required
+                                placeholder={isMobile ? "Enter your password" : " "} required
                                 value={signupData.password}
                                 onChange={e => setSignupData({ ...signupData, password: e.target.value })}
                             />
@@ -223,7 +256,7 @@ const AuthPage = () => {
                                 type={showPassword.confirm ? "text" : "password"}
                                 name="signup-confirm-password"
                                 autoComplete="new-password"
-                                placeholder=" " required
+                                placeholder={isMobile ? "Confirm your password" : " "} required
                                 value={signupData.confirm_password}
                                 onChange={e => setSignupData({ ...signupData, confirm_password: e.target.value })}
                             />
@@ -233,22 +266,22 @@ const AuthPage = () => {
                             </span>
                             <div className="bar"></div>
                         </div>
-                        <button className="btn-main" type="submit">Complete Registration</button>
-                        <span className="mobile-toggle" onClick={() => togglePanel(false)}>Already have an account? Sign In</span>
+                        <button className="btn-mobile-solid" style={{marginTop: '20px', width: '100%'}} type="submit">Register</button>
+                        <span className="mobile-toggle" onClick={() => togglePanel(false)}>Already have an account? <strong>Login Now</strong></span>
                     </form>
                 </div>
 
                 {/* Login Form */}
-                <div className={`form-container sign-in-container ${forgotFlow ? 'hidden-flow' : ''}`}>
+                <div className={`form-container sign-in-container ${forgotFlow ? 'hidden-flow' : ''}`} style={{ display: isMobile && mobileScreen !== 'login' ? 'none' : 'block' }}>
                     <form onSubmit={handleLogin}>
-                        <h2 className="form-title">Welcome Back.</h2>
+                        <h2 className="form-title">{isMobile ? "Welcome back! Glad to see you, Again!" : "Welcome Back."}</h2>
                         {error && <div className="error-msg error-visible">{error}</div>}
                         <div className="field-group">
                             <input
                                 type="email"
                                 name="login-email"
                                 autoComplete="email"
-                                placeholder=" " required
+                                placeholder={isMobile ? "Enter your email" : " "} required
                                 value={loginData.email}
                                 onChange={e => setLoginData({ ...loginData, email: e.target.value })}
                             />
@@ -261,7 +294,7 @@ const AuthPage = () => {
                                 className={showPassword.login && !windowFocused ? 'security-blur-inactive' : ''}
                                 name="login-password"
                                 autoComplete="off"
-                                placeholder=" " required
+                                placeholder={isMobile ? "Enter your password" : " "} required
                                 value={loginData.password}
                                 onChange={e => setLoginData({ ...loginData, password: e.target.value })}
                             />
@@ -271,9 +304,11 @@ const AuthPage = () => {
                             </span>
                             <div className="bar"></div>
                         </div>
-                        <span className="forgot-pass" onClick={() => setForgotFlow(true)}>Forgotten your password?</span>
-                        <button className="btn-main" type="submit">Sign In →</button>
-                        <span className="mobile-toggle" onClick={() => togglePanel(true)}>Don't have an account? Sign Up</span>
+                        <div className="forgot-pass-wrap">
+                            <span className="forgot-pass" onClick={() => setForgotFlow(true)}>Forgot Password?</span>
+                        </div>
+                        <button className="btn-mobile-solid" style={{width: '100%'}} type="submit">Login</button>
+                        <span className="mobile-toggle" onClick={() => togglePanel(true)}>Don't have an account? <strong>Register Now</strong></span>
                     </form>
                 </div>
 

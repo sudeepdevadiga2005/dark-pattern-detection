@@ -10,6 +10,7 @@ const ClientHome = () => {
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
+        document.title = 'Dark Pattern Detector';
         const verifySession = async () => {
             try {
                 // Ping a protected route to verify the session hasn't been invalidated
@@ -54,17 +55,20 @@ const ClientHome = () => {
 
     return (
         <div className={`client-portal-wrapper ${viewState}`}>
-            {/* Interactive Mouse-Following Background */}
+            {/* High-End Aegis Visualization Background */}
             <div 
-                className="neural-canvas" 
+                className="aegis-canvas" 
                 style={{ 
                     '--m-x': `${mousePos.x}px`, 
                     '--m-y': `${mousePos.y}px` 
                 }}
             >
-                <div className="neural-orb orb-1"></div>
-                <div className="neural-orb orb-2"></div>
-                <div className="grain-overlay"></div>
+                <div className="aegis-grid-top"></div>
+                <div className="aegis-orb orb-primary"></div>
+                <div className="aegis-orb orb-secondary"></div>
+                <div className="aegis-orb orb-accent"></div>
+                <div className="aegis-nodes-overlay"></div>
+                <div className="grain-filtering"></div>
             </div>
 
             <nav className="portal-mini-nav fade-in">
@@ -79,7 +83,7 @@ const ClientHome = () => {
             {viewState === 'portal' && (
                 <div className="portal-landing fade-in">
                     <header className="portal-header">
-                        <span className="security-tag">NEURAL PROTECTION ACTIVE</span>
+                        <span className="security-tag">AEGIS PROTECTION ACTIVE</span>
                         <h1>Aegis <em>Secure</em> Console</h1>
                         <p>Welcome back, <strong>{user}</strong>. Establish a connection to begin.</p>
                     </header>
@@ -89,14 +93,14 @@ const ClientHome = () => {
                             <div className="portal-icon">⚡</div>
                             <div className="portal-text">
                                 <h3>Start Scan Website</h3>
-                                <p>Launch the deep neural analyzer instantly.</p>
+                                <p>Launch the deep aegis analyzer instantly.</p>
                             </div>
                         </Link>
 
                         <Link to="/dashboard" className="portal-btn">
                             <div className="portal-icon">🗄️</div>
                             <div className="portal-text">
-                                <h3>Open Neural Archive</h3>
+                                <h3>Open Aegis Archive</h3>
                                 <p>Access historical patterns and reports.</p>
                             </div>
                         </Link>
@@ -117,7 +121,7 @@ const ClientHome = () => {
                             <Link to="/analyze" className="side-option stagger-1">
                                 <div className="opt-icon">🔍</div>
                                 <div className="opt-text">
-                                    <h3>Deep Pattern Analyzer</h3>
+                                    <h3>Aegis: Dark Pattern Detector</h3>
                                     <p>Scan links and text patterns.</p>
                                 </div>
                             </Link>

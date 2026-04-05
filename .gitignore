@@ -20,17 +20,28 @@ test_native_ddg.py
 test_tiny.py
 debug_output.txt
 debug_typo.py
+test_admin_backup.py
+test_backup_logic.py
+verify_url_logic.py
+clean_prefixes.py
 
 # Ignore security sensitive setup scripts
 create_admin.py
 promote_admin.py
+bootstrap_mongo.py
+migrate_ids.py
+purge_database.py
 
 # Ignore executables and large data files
 ngrok.exe
 dark_pattern_model.pkl
 training_data.tsv
 valid_domains.csv
+updated_categories.csv
 valid_domain/
+
+# Ignore IDE configs
+.vscode/
 
 # Ignore Chrome Extension
 chrome_extension/

@@ -5,9 +5,10 @@ import time
 import requests
 import getpass
 import json
+import datetime
 from pymongo import MongoClient
 from dotenv import load_dotenv
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 
 load_dotenv()
 
@@ -36,10 +37,19 @@ def login_admin():
 
     try:
         client = MongoClient(mongo_uri)
-        db = client["dark-pattern-users"] 
-        users_col = db["users"]
+        # Check both admin and user databases for admin privileges
+        admin_db = client["dark-pattern-admin"]
+        admins_col = admin_db["admins"]
         
-        user = users_col.find_one({'email': email})
+        user_db = client["dark-pattern-users"] 
+        users_col = user_db["users"]
+        
+        # Check admins_col first
+        user = admins_col.find_one({'email': email})
+        if not user:
+            # Fallback to users_col (Legacy/Initial)
+            user = users_col.find_one({'email': email})
+
         if user and check_password_hash(user['password'], password):
             is_admin = user.get('is_admin', False) or (user.get('email') == "admin@neuroshield.com")
             if is_admin:
@@ -55,33 +65,88 @@ def login_admin():
         print(f"\033[91m[!] Database Error: {e}\033[0m")
         return False
 
+def register_admin():
+    print("\n\033[95m[REGISTER NEW ADMINISTRATOR]\033[0m")
+    email = input("Enter new Admin Email: ").strip()
+    password = input("Enter new Admin Password: ").strip()
+    
+    if not email or not password:
+        print("\033[91m[!] Email and Password cannot be empty.\033[0m")
+        return
+        
+    mongo_uri = os.getenv("MONGO_URI")
+    try:
+        client = MongoClient(mongo_uri)
+        # Save to both if needed, but primary administrative archive is dark-pattern-admin
+        admin_db = client["dark-pattern-admin"] 
+        admins_col = admin_db["admins"]
+        
+        # Check if user already exists
+        if admins_col.find_one({'email': email}):
+            print("\033[91m[!] An account with this email already exists in admin archive.\033[0m")
+            return
+            
+        hashed_password = generate_password_hash(password)
+        
+        admins_col.insert_one({
+            'username': 'ADMIN OF DARK PATERN DETECTION',
+            'name': 'ADMIN OF DARK PATERN DETECTION',
+            'email': email,
+            'password': hashed_password,
+            'is_admin': True,
+            'created_at': datetime.datetime.now()
+        })
+        print("\033[92m[✓] Administrator 'ADMIN OF DARK PATERN DETECTION' registered successfully!\033[0m")
+        
+    except Exception as e:
+        print(f"\033[91m[!] Database Error: {e}\033[0m")
+
+def is_server_running():
+    try:
+        response = requests.get("http://localhost:5000/api/health", timeout=1)
+        return response.status_code == 200
+    except:
+        return False
+
 def main():
     clear_screen()
     print_banner()
     
-    print("Welcome Guardian. Select Operation Mode:")
-    print("1. \033[94m[CLIENT MODE]\033[0m - Standard detection interface")
-    print("2. \033[93m[ADMIN COMMAND CENTER]\033[0m - Real-time statistics & user reports")
-    print("q. Exit")
+    server_online = is_server_running()
     
-    choice = input("\nChoice > ").strip().lower()
-    
-    if choice == '1':
-        print("\n\033[94m[✓] Initializing Client Portals... Setting up secure tunnel.\033[0m")
-        subprocess.run(["npm", "run", "dev-client"], shell=True)
-    
-    elif choice == '2':
-        print("\n\033[93m[✓] Redirecting to Neural Command Center Security Gateway in Chrome...\033[0m")
+    if server_online:
+        print("\n\033[93m[!] Operational Clusters already online.\033[0m Re-synchronizing dashboard...")
         import webbrowser
-        webbrowser.open("http://localhost:5173/admin")
-        subprocess.run(["npm", "run", "dev-admin"], shell=True)
-            
-    elif choice == 'q':
-        sys.exit()
+        webbrowser.open("http://localhost:5173/") # Open Client
+        webbrowser.open("http://localhost:5174/") # Open Admin
     else:
-        print("\033[91mInvalid Choice.\033[0m")
-        time.sleep(1)
-        main()
+        print("\n\033[94m[✓] INITIALIZING FULL SYSTEM CLUSTERS (RE-STARTING ENGINE)...\033[0m")
+        print("\033[90m[Note: Initializing ML model and secure database tunnel. Estimated time: 8s]\033[0m")
+        
+        # High-Velocity Automatic Startup
+        if os.name == 'nt':
+            # Use cmd /c to ensure npm run dev-all is executed directly
+            cmd = 'npm run dev-all'
+            subprocess.Popen(f'start cmd /k "{cmd}"', shell=True)
+        else:
+            subprocess.Popen(["npm", "run", "dev-all"])
+            
+        print("\n\033[92m[✓] Neural Pulse Sent. Monitoring Startup Sequence...\033[0m")
+        
+        # Wait and verify
+        for i in range(15):
+            time.sleep(1)
+            if is_server_running():
+                print("\n\033[92m[✓] ALL SYSTEM CHANNELS: ONLINE\033[0m")
+                print("\033[96mClient Console: http://localhost:5173/\033[0m")
+                print("\033[93mAdmin Dashboard: http://localhost:5174/\033[0m")
+                print("\n\033[90mLauncher exiting... Clusters remain active in the new window.\033[0m")
+                break
+            if i == 14:
+                print("\n\033[93m[!] Pulse Delay: Server is still initializing. Check terminal logs.\033[0m")
+                
+    time.sleep(2)
+    sys.exit()
 
 if __name__ == "__main__":
     main()

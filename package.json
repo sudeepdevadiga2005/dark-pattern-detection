@@ -2,16 +2,21 @@
   "name": "dark-pattern-detection",
   "version": "2.0.0",
   "description": "Integrated Dark Pattern Detection System",
-  "scripts": {
+    "scripts": {
     "prestart": "powershell -Command \"Get-Process python, ngrok -ErrorAction SilentlyContinue | Stop-Process -Force; exit 0\"",
-    "start": "py launcher.py",
+    "start": "npm run dev-all",
     "backend": "py app.py",
-    "frontend": "cd frontend && npm run dev",
+    "frontend-client": "cd frontend && npm run dev-client",
+    "frontend-admin": "cd frontend && npm run dev-admin",
     "tunnel": "powershell -Command \"Start-Sleep -s 8; .\\ngrok.exe http 5000 --log stdout\"",
-    "dev-client": "npx concurrently -n BACKEND,FRONTEND,TUNNEL -c magenta,cyan,green --kill-others \"npm run backend\" \"npm run frontend\" \"npm run tunnel\"",
-    "dev-admin": "npx concurrently -n BACKEND,FRONTEND -c magenta,cyan --kill-others \"npm run backend\" \"npm run frontend\""
+    "dev-all": "npx concurrently -n BACKEND,CLIENT,ADMIN,TUNNEL -c magenta,cyan,yellow,green --kill-others \"npm run backend\" \"npm run frontend-client\" \"npm run frontend-admin\" \"npm run tunnel\"",
+    "dev-client": "npm run dev-all",
+    "dev-admin": "npx concurrently -n BACKEND,ADMIN -c magenta,yellow --kill-others \"npm run backend\" \"npm run frontend-admin\""
   },
   "devDependencies": {
     "concurrently": "^8.2.2"
+  },
+  "dependencies": {
+    "puppeteer": "^24.40.0"
   }
 }

@@ -1,5 +1,6 @@
-const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-const API_BASE_URL = import.meta.env.VITE_API_URL || (isLocalhost ? "http://localhost:5000/api" : "/api"); 
-// Note: User should update VITE_API_URL in their environment or replace the default above.
+// Use a relative path so requests go through the Vite proxy in dev mode.
+// This keeps API calls same-origin, which is required for Flask session cookies.
+// In production (Flask serves the built React app), /api routes are handled directly.
+const API_BASE_URL = import.meta.env.VITE_API_URL || "/api";
 
 export default API_BASE_URL;

@@ -9,7 +9,9 @@ import uuid
 import threading
 from flask import Flask, request, jsonify, session, make_response, send_from_directory
 from flask_cors import CORS, cross_origin
-from scraper import analyze_url, analyze_text, fetch_with_rotation
+from trust_pipeline.datasets import load_datasets
+from trust_pipeline.pipeline import process_text, process_url_domain
+from trust_pipeline.utils import detect_input_type
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 from pymongo import MongoClient
@@ -22,6 +24,7 @@ from urllib3.exceptions import InsecureRequestWarning
 
 # Suppress insecure request warnings globally
 warnings.filterwarnings('ignore', category=InsecureRequestWarning)
+from bson import ObjectId # Essential for database object manipulation
 
 
 # Load environment variables
@@ -33,8 +36,21 @@ dist_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'frontend
 app = Flask(__name__, static_folder=dist_folder)
 app.secret_key = os.getenv("APP_SESSION_KEY", "default-secret-key-keep-it-safe")
 
-# Broad CORS for local ngrok demo and production stability
-CORS(app, supports_credentials=True, origins=["*"])
+# Load datasets for the trust pipeline
+load_datasets()
+
+
+# Define explicit allowed origins for credentialed cross-origin stability
+ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+    "http://localhost:5000",
+    "http://127.0.0.1:5000"
+]
+
+CORS(app, supports_credentials=True, origins=ALLOWED_ORIGINS)
 
 # Session Configuration
 # SameSite=Lax works correctly for same-origin requests (Vite proxy or production).
@@ -49,25 +65,54 @@ app.config.update(
 # MongoDB Setup - Build Safe
 db = None
 users_col = None
+user_db = None
+
+def get_next_sequence(name):
+    """Generates a sequential integer identifier starting from 100000"""
+    if user_db is None: return "000000"
+    
+    from pymongo import ReturnDocument
+    # Atomic increment operation
+    counter = user_db['counters'].find_one_and_update(
+        {'_id': name},
+        {'$inc': {'seq': 1}},
+        upsert=True,
+        return_document=ReturnDocument.AFTER
+    )
+    
+    # If this is a fresh start, initialize sequence at 100,000
+    if counter['seq'] < 100000:
+        counter = user_db['counters'].find_one_and_update(
+            {'_id': name},
+            {'$set': {'seq': 100000}},
+            return_document=ReturnDocument.AFTER
+        )
+    return str(counter['seq'])
 analyses_col = None
 
 if MONGO_URI:
     try:
         client = MongoClient(MONGO_URI)
-        db = client["dark-pattern-users"] 
-        users_col = db["users"]
-        analyses_col = db["analyses"]
+        
+        # Preserve legacy user data while isolating new administrative records
+        user_db = client["dark-pattern-users"] 
+        admin_db = client["dark-pattern-admin"]
+        
+        users_col = user_db["users"]       # Standard users (18+ entries found)
+        admins_col = admin_db["admins"]     # Secure administrative archive
+        analyses_col = user_db["analyses"] # Shared analytics namespace
+        
         client.admin.command('ping')
-        print("Database Connection: ONLINE (MongoDB Atlas)")
+        print("Database Connection: ONLINE (MongoDB Atlas)", flush=True)
     except Exception as e:
-        print(f"DATABASE ERROR: {e}")
+        print(f"DATABASE ERROR: {e}", flush=True)
 else:
-    print("DATABASE WARNING: MONGO_URI not found. Database features will be disabled until configured.")
+    print("DATABASE WARNING: MONGO_URI not found. Database features will be disabled until configured.", flush=True)
 
 def close_db_connection():
     global client
     if 'client' in globals() and client:
-        print("Closing Database Connection...")
+        print("Closing Database Connection...", flush=True)
         client.close()
 
 atexit.register(close_db_connection)
@@ -75,9 +120,9 @@ atexit.register(close_db_connection)
 @app.before_request
 def log_session():
     # Helpful for debugging why login might "not work"
-    print(f"--- Request: {request.method} {request.path} ---")
-    print(f"Session State: {'LOGGED IN as ' + session['user'] if 'user' in session else 'GUEST'}")
-    print(f"Origin: {request.headers.get('Origin')}")
+    print(f"--- Request: {request.method} {request.path} ---", flush=True)
+    print(f"Session State: {'LOGGED IN as ' + session['user'] if 'user' in session else 'GUEST'}", flush=True)
+    print(f"Origin: {request.headers.get('Origin')}", flush=True)
 
 def login_required(f):
     @wraps(f)
@@ -91,7 +136,11 @@ def login_required(f):
             user = users_col.find_one(lookup_query)
             if not user or user.get('session_id') != session['session_id']:
                 # The session_id in DB is different (meaning they logged in elsewhere)
-                session.clear()
+                # Selective Path Isolation: Only clear client-level keys, leaving the administrative session intact.
+                session.pop('user', None)
+                session.pop('session_id', None)
+                session.pop('email', None)
+                session.pop('client_id', None)
                 return jsonify({'success': False, 'message': 'Session expired or logged in from another device. Please login again.'}), 401
                 
         return f(*args, **kwargs)
@@ -118,10 +167,13 @@ def signup():
         if password != confirm_password:
             return jsonify({'success': False, 'message': 'Passwords do not match'}), 400
 
-        if users_col.find_one({'$or': [{'username': username}, {'email': email}]}):
-            return jsonify({'success': False, 'message': 'Username or Email already exists'}), 400
+        if users_col.find_one({'email': email}):
+            return jsonify({'success': False, 'message': 'Email address already recorded in neural archive.'}), 400
             
         hashed_password = generate_password_hash(password)
+        
+        # Generate Sequential Unique Client ID (6 digits)
+        client_id = get_next_sequence('client_id')
         
         # Save to MongoDB: Includes the super_key (which is the SECRET_KEY)
         users_col.insert_one({
@@ -129,6 +181,7 @@ def signup():
             'email': email,
             'password': hashed_password,
             'super_key': super_key, 
+            'client_id': client_id,
             'created_at': datetime.datetime.now()
         })
         
@@ -139,9 +192,9 @@ def signup():
             file_exists = os.path.isfile(csv_file)
             with open(csv_file, "a", encoding='utf-8') as f:
                 if not file_exists:
-                    f.write("Timestamp,Username,Email,Password\n")
+                    f.write("Timestamp,Username,Email,Password,Role\n")
                 # Escaping commas by wrapping in quotes for basic CSV safety
-                f.write(f'"{timestamp}","{username}","{email}","{password}"\n')
+                f.write(f'"{timestamp}","{username}","{email}","{password}","client"\n')
         except Exception as e:
             print(f"BACKUP ERROR: {e}")
 
@@ -178,6 +231,7 @@ def login():
             session.permanent = True  # Make the cookie survive server restarts
             session['user'] = user['username']
             session['email'] = user['email']
+            session['client_id'] = user.get('client_id', 'NS-GUEST')
             session['session_id'] = new_session_id
             
             response = make_cookie_response({'success': True, 'user': user['username']})
@@ -344,19 +398,33 @@ def log_analysis(user, data):
         print(f"DATABASE WARNING: Skipping log for {user} (analyses_col is None)")
         return
 
+    # Map classification to strictly "Safe" or "Unsafe"
+    raw_status = data.get('classification') or data.get('status') or 'Unknown'
+    
+    # Logic: Only 'Safe' is Safe. Everything else (Scam, Fake, Suspicious) is Unsafe.
+    if raw_status == 'Safe':
+        safety_status = 'Safe'
+    elif raw_status == 'Unknown':
+        safety_status = 'Unknown'
+    else:
+        safety_status = 'Unsafe'
+
     analysis_entry = {
         'username': user,
+        'client_id': session.get('client_id', 'NS-GUEST'),
         'timestamp': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        'type': data.get('type'),
-        'url': data.get('url', 'N/A'),
+        'type': data.get('type', 'url'),
+        'url': data.get('url') or data.get('target_url') or data.get('domain') or "[ Text Analysis Segment ]",
         'trust_score': data.get('trust_score'),
-        'safety_status': data.get('safety_status'),
-        'total_patterns_found': data.get('total_patterns_found'),
-        'findings': data.get('findings')
+        'safety_status': safety_status,
+        'raw_classification': raw_status, # Preserve the original classification for detail
+        'total_patterns_found': data.get('total_patterns_found') if data.get('total_patterns_found') is not None else data.get('total_patterns'),
+        'findings': data.get('findings'),
+        'conclusion': data.get('security_warning') or data.get('conclusion_from_internet') or "No specific conclusion provided."
     }
     try:
         analyses_col.insert_one(analysis_entry)
-        print(f"Logged analysis to MongoDB for user: {user}")
+        print(f"Logged analysis to MongoDB for user: {user} as {safety_status}")
     except Exception as e:
         print(f"Error logging to MongoDB: {e}")
 
@@ -400,7 +468,13 @@ def detect_device():
 
 @app.route('/api/health')
 def health():
-    return jsonify({'status': 'ONLINE', 'database': 'CONNECTED' if db is not None else 'OFFLINE'})
+    # Use a variable that is guaranteed to be in scope
+    db_status = 'CONNECTED' if users_col is not None else 'OFFLINE'
+    return jsonify({
+        'status': 'ONLINE', 
+        'database': db_status,
+        'backend_initialized': True
+    })
 
 @app.route('/api/dashboard')
 @login_required
@@ -440,26 +514,47 @@ def clear_user_history():
 @login_required
 def analyze_t():
     data = request.get_json()
-    text = data.get('text')
+    text = data.get('text') or data.get('input', '')
     if not text:
         return jsonify({'success': False, 'error': 'Text is required'}), 400
-    result = analyze_text(text)
+    
+    result = process_text(text)
+    
+    # Adapt to log_analysis expectations
+    result['success'] = True if result['status'] != 'INVALID_INPUT' else False
     if result.get('success'):
+        snippet = (text[:60] + '...') if len(text) > 60 else text
+        result['url'] = snippet
+        # Set conclusion and classification mapped from status
+        result['conclusion'] = result.get('message', '')
+        result['classification'] = "Safe" if result.get('status') == "SAFE" or result.get('status') == "LOW_RISK_TEXT" else "Suspicious"
         log_analysis(session['user'], result)
+        
     return jsonify(result)
 
 @app.route('/api/analyze', methods=['POST'])
 @login_required
 def analyze():
     data = request.get_json()
-    url = data.get('url', '').strip()
+    url = data.get('url', '').strip() or data.get('input', '').strip()
     if not url:
         return jsonify({'success': False, 'error': 'URL is required'}), 400
-    if not url.startswith(('http://', 'https://')):
-        url = 'https://' + url
-    result = analyze_url(url)
+        
+    input_type = detect_input_type(url)
+    if input_type not in ("url", "domain"):
+        input_type = "url"
+    result = process_url_domain(url, input_type)
+    
+    # Adapt to log_analysis expectations
+    result['success'] = True if result['status'] != 'INVALID_INPUT' else False
     if result.get('success'):
+        if 'url' not in result: 
+            result['url'] = result.get('normalized_url') or url
+        # Define compatibility fields
+        result['classification'] = "Safe" if result.get('status') in ("SAFE", "LIKELY_SAFE") else "Suspicious" if result.get('status') == "SUSPICIOUS" else "Unknown"
+        result['security_warning'] = result.get('message', '')
         log_analysis(session['user'], result)
+        
     return jsonify(result)
 
 @app.route('/api/scrape-details', methods=['POST'])
@@ -503,9 +598,11 @@ def ext_analyze():
     if not url:
         return jsonify({'success': False, 'error': 'URL is required'}), 400
     
-    # We add a fallback URL check since extensions pass raw URLs 
-    result = analyze_url(url)
-    
+    input_type = detect_input_type(url)
+    if input_type not in ("url", "domain"):
+        input_type = "url"
+    result = process_url_domain(url, input_type)
+    result['success'] = True if result['status'] != 'INVALID_INPUT' else False
     # Optionally, we can log it with a dummy user 'extension_user'
     # if result.get('success'):
     #     log_analysis('extension_user', result)
@@ -532,27 +629,34 @@ def admin_login():
     email = data.get('email')
     password = data.get('password')
     
-    if users_col is None:
+    if admins_col is None:
         return jsonify({'success': False, 'message': 'Database connection error'}), 503
         
-    user = users_col.find_one({'email': email})
-    if user and check_password_hash(user['password'], password):
-        # We check for explicitly 'is_admin' field or a specific 'founder' email
-        # To bootstrap the first admin, we allow a specific email if no is_admin field exists
-        is_admin = user.get('is_admin', False) or (user.get('email') == "admin@neuroshield.com")
+    # Check explicitly in the new dedicated admin collection
+    user = admins_col.find_one({'email': email})
+    
+    if not user:
+        # Fallback for initial bootstrap (Founder account)
+        # Also check if any user in the main collection has is_admin=True
+        user = users_col.find_one({'email': email, 'is_admin': True})
+        if not user and email == "admin@neuroshield.com":
+             # Last resort: founder account even if is_admin flag is missing
+             user = users_col.find_one({'email': email})
         
-        if is_admin:
-            # Set admin session
-            session.permanent = True
-            session['admin_user'] = user['username']
-            session['is_admin'] = True
-            
-            response = make_cookie_response({'success': True, 'message': 'Admin Access Granted', 'admin': user['username']})
-            # Also set a cookie for frontend logic (not for security)
-            response.set_cookie('is_admin', 'true', max_age=3600*24, samesite='Lax')
-            return response
-        else:
-            return jsonify({'success': False, 'message': 'Access Denied: You do not have administrator privileges'}), 403
+        if not user:
+            return jsonify({'success': False, 'message': 'Admin identity not recognized in secure archive.'}), 401
+
+    if user and check_password_hash(user['password'], password):
+        # Set admin session
+        session.permanent = True
+        session['admin_user'] = user['username']
+        session['admin_email'] = user['email']
+        session['is_admin'] = True
+        
+        response = make_cookie_response({'success': True, 'message': 'Admin Access Granted', 'admin': user['username']})
+        # Also set a cookie for frontend logic (not for security)
+        response.set_cookie('is_admin', 'true', max_age=3600*24, samesite='Lax')
+        return response
             
     return jsonify({'success': False, 'message': 'Invalid Admin Credentials'}), 401
 
@@ -573,26 +677,46 @@ def admin_stats():
     total_users = users_col.count_documents({})
     total_scans = analyses_col.count_documents({})
     
-    # Calculate daily scan frequency for the last 7 days (for Recharts)
     now = datetime.datetime.now()
-    daily_stats = []
+    
+    # 1. Hourly Stats (for 'D') - Last 24 hours
+    hourly_stats = []
+    for i in range(23, -1, -1):
+        hour_ago = now - datetime.timedelta(hours=i)
+        hour_str = hour_ago.strftime('%Y-%m-%d %H')
+        count = analyses_col.count_documents({'timestamp': {'$regex': f'^{hour_str}'}})
+        hourly_stats.append({'name': hour_ago.strftime('%H:00'), 'scans': count})
+        
+    # 2. Weekly Stats (for 'W') - Last 7 days
+    weekly_stats = []
     for i in range(6, -1, -1):
         day = now - datetime.timedelta(days=i)
         date_str = day.strftime('%Y-%m-%d')
-        # Match 'timestamp' string in database: '2026-03-22 20:30:27'
-        # We use regex to match just the date part
-        count = analyses_col.count_documents({
-            'timestamp': {'$regex': f'^{date_str}'}
-        })
-        daily_stats.append({
-            'name': day.strftime('%d %b'),
-            'scans': count
-        })
+        count = analyses_col.count_documents({'timestamp': {'$regex': f'^{date_str}'}})
+        weekly_stats.append({'name': day.strftime('%d %b'), 'scans': count})
         
+    # 3. Monthly Stats (for 'M') - Last 30 days (sampled every 2-3 days for clarity if many)
+    # We'll just provide all 30 days for now
+    monthly_stats = []
+    for i in range(29, -1, -1):
+        day = now - datetime.timedelta(days=i)
+        date_str = day.strftime('%Y-%m-%d')
+        count = analyses_col.count_documents({'timestamp': {'$regex': f'^{date_str}'}})
+        monthly_stats.append({'name': day.strftime('%d %b'), 'scans': count})
+
+    total_safe = analyses_col.count_documents({'safety_status': 'Safe'})
+    total_threats = analyses_col.count_documents({'safety_status': {'$ne': 'Safe'}})
+
     return jsonify({
         'total_users': total_users,
         'total_scans': total_scans,
-        'daily_stats': daily_stats
+        'total_safe': total_safe,
+        'total_threats': total_threats,
+        'hourly_stats': hourly_stats,
+        'weekly_stats': weekly_stats,
+        'monthly_stats': monthly_stats,
+        'daily_stats': weekly_stats, # For backward compatibility
+        'admin_username': session.get('admin_user')
     })
 
 @app.route('/api/admin/users', methods=['GET'])
@@ -601,9 +725,32 @@ def admin_users():
     if users_col is None:
         return jsonify({'success': False, 'message': 'Database offline'}), 503
         
-    users = list(users_col.find({}).sort('created_at', -1).limit(50))
+    users = list(users_col.find({}).sort('created_at', -1))
     for user in users:
         user['_id'] = str(user['_id'])
+        
+        # Migrate users without the new 6-digit sequence ID or having old NS- prefix
+        if 'client_id' not in user or (isinstance(user['client_id'], str) and user['client_id'].startswith("NS-")):
+            user['client_id'] = get_next_sequence('client_id')
+            users_col.update_one({'_id': ObjectId(user['_id'])}, {'$set': {'client_id': user['client_id']}})
+        
+        # FORCE RE-SYNC: Ensure all historical scans by this username are attributed to their 6-digit ID
+        # This covers cases where scans exist but are either untracked or still using legacy NS- IDs
+        if 'client_id' in user:
+            analyses_col.update_many(
+                {
+                    'username': user['username'], 
+                    '$or': [
+                        {'client_id': {'$exists': False}}, 
+                        {'client_id': {'$regex': '^NS-'}}
+                    ]
+                },
+                {'$set': {'client_id': user['client_id']}}
+            )
+
+        # Count total neural engagement for each user profile
+        user['scan_count'] = analyses_col.count_documents({'client_id': user['client_id']})
+        
         # Never send password tokens to frontend
         user.pop('password', None)
         user.pop('session_id', None)
@@ -618,16 +765,120 @@ def admin_scans():
     if analyses_col is None:
         return jsonify({'success': False, 'message': 'Database offline'}), 503
         
-    # Get last 100 scans for the logging view
-    scans = list(analyses_col.find({}).sort('timestamp', -1).limit(100))
+    # Increased limit to 1000 for total archive transparency
+    scans = list(analyses_col.find({}).sort('timestamp', -1).limit(1000))
     for scan in scans:
         scan['_id'] = str(scan['_id'])
         
     return jsonify(scans)
 
+@app.route('/api/admin/register', methods=['POST'])
+def admin_register():
+    if admins_col is None:
+        return jsonify({'success': False, 'message': 'Database offline'}), 503
+        
+    # BOOTSTRAP PROTOCOL: If no admins exist, allow the first one to register.
+    # Otherwise, require existing administrator credentials.
+    admin_count = admins_col.count_documents({})
+    if admin_count > 0:
+        if 'admin_user' not in session or not session.get('is_admin'):
+            return jsonify({'success': False, 'message': 'Administrator privileges required to register new security identities.'}), 403
+        
+    data = request.get_json()
+    username = data.get('username')
+    email = data.get('email')
+    password = data.get('password')
+    
+    if not all([username, email, password]):
+        return jsonify({'success': False, 'message': 'All fields are required'}), 400
+        
+    if admins_col.find_one({'email': email}):
+        return jsonify({'success': False, 'message': 'Admin already exists'}), 400
+        
+    hashed_password = generate_password_hash(password)
+    super_key = app.secret_key
+    
+    admins_col.insert_one({
+        'username': username,
+        'email': email,
+        'password': hashed_password,
+        'super_key': super_key,
+        'created_at': datetime.datetime.now(),
+        'is_admin': True
+    })
+    
+    # Backup to CSV with admin role
+    try:
+        timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        with open("user_backups.csv", "a", encoding='utf-8') as f:
+            f.write(f'"{timestamp}","{username}","{email}","{password}","admin"\n')
+    except: pass
+    
+    return jsonify({'success': True, 'message': f'New administrator {username} registered successfully.'})
+
+@app.route('/api/admin/clear-logs', methods=['POST'])
+@admin_required
+def clear_logs():
+    if analyses_col is None:
+        return jsonify({'success': False, 'message': 'Database offline'}), 503
+        
+    data = request.get_json()
+    password = data.get('password')
+    admin_email = session.get('admin_email')
+    
+    if not password:
+        return jsonify({'success': False, 'message': 'Password required to purge logs'}), 400
+        
+    # Verify identification via email
+    admin = admins_col.find_one({'email': admin_email})
+    if not admin:
+        admin = users_col.find_one({'email': admin_email, 'is_admin': True})
+        
+    if not admin or not check_password_hash(admin['password'], password):
+        return jsonify({'success': False, 'message': 'Access Denied: Incorrect administrative passcode.'}), 401
+        
+    # Proceed with log purge (Surgical, Log-only, or Total Account Purge)
+    mode = data.get('mode', 'logs') # 'logs', 'accounts', or 'both'
+    client_id = data.get('client_id')
+    
+    if client_id:
+        # SURGICAL PURGE: Only logs for this specific operative
+        result = analyses_col.delete_many({'client_id': str(client_id)})
+        msg = f"Surgical Purge Successful: {result.deleted_count} logs removed for operative {client_id}."
+    else:
+        # ARCHIVE PURGE: System-wide operation
+        deleted_scans = 0
+        deleted_users = 0
+        
+        if mode in ['logs', 'both']:
+            res = analyses_col.delete_many({})
+            deleted_scans = res.deleted_count
+            
+        if mode in ['accounts', 'both']:
+            res = users_col.delete_many({})
+            deleted_users = res.deleted_count
+            # Also reset the sequential counter for high-fidelity synchronization
+            counters_col.update_one({'_id': 'client_id'}, {'$set': {'seq': 100000}}, upsert=True)
+
+        msg = f"Neural Archive Reset complete. Scans Purged: {deleted_scans}. Operatives Purged: {deleted_users}."
+        
+    return jsonify({'success': True, 'message': msg})
+
+@app.route('/api/admin/delete-scan/<scan_id>', methods=['DELETE'])
+@admin_required
+def delete_scan(scan_id):
+    if analyses_col is None:
+        return jsonify({'success': False, 'message': 'Database offline'}), 503
+    try:
+        from bson.objectid import ObjectId
+        analyses_col.delete_one({'_id': ObjectId(scan_id)})
+        return jsonify({'success': True, 'message': 'Log entry purged.'})
+    except:
+        return jsonify({'success': False, 'message': 'Invalid ID'}), 400
+
 if __name__ == '__main__':
-    print("\n" + "="*50)
-    print("  BACKEND SERVER IS RUNNING")
-    print("  Local Access: http://localhost:5000")
-    print("="*50 + "\n")
+    print("\n" + "="*50, flush=True)
+    print("  BACKEND SERVER IS RUNNING", flush=True)
+    print("  Local Access: http://localhost:5000", flush=True)
+    print("="*50 + "\n", flush=True)
     app.run(debug=True, port=5000)

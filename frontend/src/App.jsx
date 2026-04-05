@@ -7,7 +7,6 @@ import ClientHome from './pages/ClientHome';
 import AuthPage from './pages/AuthPage';
 import Dashboard from './pages/Dashboard';
 import Analyze from './pages/Analyze';
-import WebScraper from './pages/WebScraper';
 import AdminDashboard from './pages/AdminDashboard';
 import AdminLogin from './pages/AdminLogin';
 import Cookies from 'js-cookie';
@@ -52,7 +51,6 @@ function App() {
         <Route path="/signup" element={<AuthPage />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/analyze" element={<Analyze />} />
-        <Route path="/scraper" element={<WebScraper />} />
         <Route path="/admin/login" element={<AdminLogin />} />
         <Route 
           path="/admin" 

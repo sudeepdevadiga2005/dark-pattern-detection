@@ -49,7 +49,7 @@ const LandingPage = () => {
                         <p className="hero-subtitle">
                             Welcome to your unified protection hub. Monitor your history,
                             verify mysterious links, and analyze suspicious text patterns
-                            using our neural detection engine.
+                            using our aegis detection engine.
                         </p>
                         <div className="hero-btns" style={{ display: 'flex', gap: '20px', justifyContent: 'center', marginTop: '30px' }}>
                             <Link to="/analyze" className="btn-auth btn-hero">Start Analysis Tool →</Link>
@@ -100,7 +100,7 @@ const LandingPage = () => {
             <section className="features" id="features">
                 <div className="feature-card">
                     <div className="feature-icon">🔍</div>
-                    <h3>Deep Scan</h3>
+                    <h3>Aegis Scan</h3>
                     <p>Multi-layered heuristic analysis for 15+ categories of deceptive design.</p>
                 </div>
                 <div className="feature-card">

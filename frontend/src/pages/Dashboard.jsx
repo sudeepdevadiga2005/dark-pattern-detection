@@ -20,6 +20,7 @@ const Dashboard = () => {
     axios.defaults.withCredentials = true;
 
     useEffect(() => {
+        document.title = 'Dark Pattern Detector';
         const queryParams = new URLSearchParams(location.search);
         const viewParam = queryParams.get('view');
         if (viewParam === 'account') {
@@ -60,6 +61,19 @@ const Dashboard = () => {
             window.location.href = '/login';
         } catch (err) {
             window.location.href = '/login';
+        }
+    };
+
+    const handleClearHistory = async () => {
+        const confirmClear = window.confirm("Are you sure you want to clear your entire scan history? This action cannot be undone.");
+        if (confirmClear) {
+            try {
+                await axios.post(`${API_BASE_URL}/clear-history`);
+                fetchDashboardData();
+            } catch (err) {
+                console.error("Failed to clear history", err);
+                alert("Could not clear history. Please try again later.");
+            }
         }
     };
 
@@ -144,7 +158,12 @@ const Dashboard = () => {
                         {view === 'unsafe' && 'Detected Threats Archive'}
                         {view === 'account' && 'Account Management'}
                     </h2>
-                    <Link to="/analyze" className="btn-new-scan">🔍 Deep Scan Analyzer</Link>
+                    <div className="header-actions">
+                        {view !== 'account' && stats.total > 0 && (
+                            <button className="btn-clear-history" onClick={handleClearHistory}>🗑️ Clear History</button>
+                        )}
+                        <Link to="/analyze" className="btn-new-scan">🔍 Aegis Scan Analyzer</Link>
+                    </div>
                 </header>
 
                 {view === 'account' ? (
@@ -215,12 +234,12 @@ const Dashboard = () => {
                                     {showHelp && (
                                         <div className="accordion-content fade-in">
                                             <div className="accordion-section">
-                                                <h4>How to use Deep Scan</h4>
-                                                <p>Navigate to the "Deep Scan Analyzer" via the top right button or from your client home. Paste any e-commerce product URL or raw text snippet, and Aegis will detect pressure tactics mathematically.</p>
+                                                <h4>How to use Aegis Scan</h4>
+                                                <p>Navigate to the "Aegis Scan Analyzer" via the top right button or from your client home. Paste any e-commerce product URL or raw text snippet, and Aegis will detect pressure tactics mathematically.</p>
                                             </div>
                                             <div className="accordion-section">
                                                 <h4>Report False Positives</h4>
-                                                <p>If Aegis wrongly flagged a safe site as "manipulative," you can soon report it in your Audit History. This helps train our neural engine to reduce false positives.</p>
+                                                <p>If Aegis wrongly flagged a safe site as "manipulative," you can soon report it in your Audit History. This helps train our aegis engine to reduce false positives.</p>
                                             </div>
                                             <div className="accordion-section">
                                                 <h4>Contact Security Team</h4>
@@ -244,7 +263,7 @@ const Dashboard = () => {
                                         <div className="accordion-content fade-in">
                                             <div className="accordion-section">
                                                 <h4>About Aegis</h4>
-                                                <p>Aegis: The Dark-Pattern Detector is an advanced neural engine designed to proactively identify and neutralize manipulative web elements, protecting your psychological agency online.</p>
+                                                <p>Aegis: The Dark-Pattern Detector is an advanced aegis engine designed to proactively identify and neutralize manipulative web elements, protecting your psychological agency online.</p>
                                             </div>
                                             <div className="accordion-section">
                                                 <h4>Privacy & Data Sovereignty</h4>
