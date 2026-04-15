@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev-client": "vite --port 5173 --strictPort",
-    "dev-admin": "vite --port 5174 --strictPort",
+    "dev-client": "wait-on tcp:5000 && vite --port 5173 --strictPort",
+    "dev-admin": "wait-on tcp:5000 && vite --port 5174 --strictPort",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
@@ -31,6 +31,7 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
-    "vite": "^7.3.1"
+    "vite": "^7.3.1",
+    "wait-on": "^9.0.5"
   }
 }

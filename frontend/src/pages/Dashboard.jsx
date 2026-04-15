@@ -1,330 +1,402 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import API_BASE_URL from '../config';
 import { Link, useLocation } from 'react-router-dom';
+import { 
+    LayoutDashboard, 
+    History, 
+    ShieldCheck, 
+    ShieldAlert, 
+    Settings, 
+    LogOut, 
+    Search, 
+    TrendingUp, 
+    Bell, 
+    HelpCircle, 
+    Shield, 
+    Activity,
+    CheckCircle2,
+    AlertTriangle,
+    FileText,
+    Globe,
+    ChevronRight,
+    User,
+    Mail,
+    Calendar,
+    Lock,
+    Info
+} from 'lucide-react';
+import { 
+    LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+    PieChart, Pie, Cell, AreaChart, Area
+} from 'recharts';
 import './Dashboard.css';
 
 const Dashboard = () => {
     const location = useLocation();
     const [history, setHistory] = useState([]);
     const [user, setUser] = useState('');
-    const [view, setView] = useState('history'); // 'history', 'safe', 'unsafe', 'account'
-    const [stats, setStats] = useState({ total: 0, safe: 0, unsafe: 0 });
+    const [profile, setProfile] = useState(null);
+    const [view, setView] = useState('overview'); 
     const [fetching, setFetching] = useState(true);
     const [error, setError] = useState('');
-    const [showAbout, setShowAbout] = useState(false);
-    const [showHelp, setShowHelp] = useState(false);
-    const [showNotifications, setShowNotifications] = useState(false);
-
-    // Ensure cookies are sent with every request
-    axios.defaults.withCredentials = true;
 
     useEffect(() => {
-        document.title = 'Dark Pattern Detector';
+        document.title = 'Aegis Secure Console';
         const queryParams = new URLSearchParams(location.search);
         const viewParam = queryParams.get('view');
-        if (viewParam === 'account') {
-            setView('account');
-        }
+        if (viewParam) setView(viewParam);
         fetchDashboardData();
     }, [location]);
 
     const fetchDashboardData = async () => {
-        setFetching(true);
         try {
-            const res = await axios.get(`${API_BASE_URL}/dashboard`);
-            const data = res.data.history || [];
-            setUser(res.data.user || '');
-            setHistory(data);
-
-            // Calculate Stats
-            setStats({
-                total: data.length,
-                safe: data.filter(h => h.safety_status === 'Safe' || (h.safety_status && h.safety_status.includes('SAFE'))).length,
-                unsafe: data.filter(h => h.safety_status !== 'Safe' && (!h.safety_status || !h.safety_status.includes('SAFE'))).length
-            });
-
+            const res = await axios.get(`${API_BASE_URL}/dashboard`, { withCredentials: true });
+            setUser(res.data.user || 'Member');
+            setProfile(res.data.profile || null);
+            setHistory(res.data.history || []);
             setFetching(false);
         } catch (err) {
             if (err.response?.status === 401) {
                 window.location.href = '/login';
             } else {
                 setFetching(false);
-                setError("Connection failure.");
+                setError("Unable to synchronize with Aegis Core.");
             }
         }
     };
 
     const handleLogout = async () => {
         try {
-            await axios.get(`${API_BASE_URL}/logout`);
+            await axios.get(`${API_BASE_URL}/logout`, { withCredentials: true });
             window.location.href = '/login';
         } catch (err) {
             window.location.href = '/login';
         }
     };
 
-    const handleClearHistory = async () => {
-        const confirmClear = window.confirm("Are you sure you want to clear your entire scan history? This action cannot be undone.");
-        if (confirmClear) {
-            try {
-                await axios.post(`${API_BASE_URL}/clear-history`);
-                fetchDashboardData();
-            } catch (err) {
-                console.error("Failed to clear history", err);
-                alert("Could not clear history. Please try again later.");
-            }
+    // Calculate Analytics
+    const stats = useMemo(() => {
+        const total = history.length;
+        const safe = history.filter(h => h.safety_status?.toLowerCase() === 'safe').length;
+        const threats = history.filter(h => h.safety_status?.toLowerCase() === 'unsafe').length;
+        const avgTrust = total > 0 ? Math.round(history.reduce((a, b) => a + (b.trust_score || 0), 0) / total) : 100;
+        
+        let risk = 'Low';
+        if (avgTrust < 50) risk = 'High';
+        else if (avgTrust < 80) risk = 'Medium';
+
+        return { total, safe, threats, avgTrust, risk };
+    }, [history]);
+
+    // Chart Data Preparation
+    const chartData = useMemo(() => {
+        // Last 7 days scan activity
+        const data = [];
+        for(let i = 6; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            
+            // Count scans for this date in history (assuming timestamp format matches loosely)
+            const count = history.filter(h => {
+                const hDate = new Date(h.timestamp);
+                return hDate.toDateString() === d.toDateString();
+            }).length;
+
+            data.push({ name: dateStr, scans: count });
         }
-    };
+        return data;
+    }, [history]);
 
-    const filteredHistory = history.filter(item => {
-        if (view === 'safe') return item.safety_status === 'Safe' || (item.safety_status && item.safety_status.includes('SAFE'));
-        if (view === 'unsafe') return item.safety_status !== 'Safe' && (!item.safety_status || !item.safety_status.includes('SAFE'));
-        return true;
-    });
+    const pieData = [
+        { name: 'Safe', value: stats.safe, color: '#22C55E' },
+        { name: 'Threats', value: stats.threats, color: '#EF4444' }
+    ];
 
-    if (fetching || error) {
+    if (fetching) {
         return (
-            <div className="dashboard-wrapper loading-center">
-                <div className="bg-canvas">
-                    <div className="orb orb-1"></div>
-                    <div className="orb orb-2"></div>
-                </div>
-                <div className="brand-mark">D</div>
-                <p>{error || "Fetching History..."}</p>
+            <div className="aegis-loader-screen">
+                <Shield className="pulse-icon" size={48} />
+                <span>Decrypting Vault Items...</span>
             </div>
         );
     }
 
     return (
         <div className="dashboard-layout">
-            <aside className="dash-sidebar">
-                <div className="sidebar-brand">
-                    <Link to="/" style={{ textDecoration: 'none', color: 'inherit', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <div className="brand-mark">D</div>
-                        <span>Aegis: The Dark-Pattern Detector</span>
-                    </Link>
+            {/* Sidebar */}
+            <aside className="aegis-sidebar">
+                <Link to="/" className="sidebar-brand">
+                    <div className="brand-logo-box">
+                        <Shield size={20} />
+                    </div>
+                    <span>AEGIS <em>CORE</em></span>
+                </Link>
+
+                <div className="sidebar-profile">
+                    <div className="profile-avatar">{user.charAt(0).toUpperCase()}</div>
+                    <div className="profile-info">
+                        <span className="profile-name">{user}</span>
+                        <span className="profile-tag">SECURITY OPERATIVE</span>
+                    </div>
                 </div>
 
-                <div className="sidebar-user-profile">
-                    <div className="sidebar-avatar">{user.charAt(0).toUpperCase()}</div>
-                    <div className="sidebar-user-name">{user}</div>
-                </div>
-
-                <div className="sidebar-nav">
-                    <button
-                        className={`nav-btn ${view === 'history' ? 'active' : ''} `}
-                        onClick={() => setView('history')}
-                    >
-                        <span className="icon">📊</span>
-                        Full History
-                        <span className="count">{stats.total}</span>
+                <nav className="sidebar-nav">
+                    <button className={`nav-item ${view === 'overview' ? 'active' : ''}`} onClick={() => setView('overview')}>
+                        <LayoutDashboard size={20} /> Dashboard
                     </button>
-                    <button
-                        className={`nav-btn ${view === 'safe' ? 'active' : ''} `}
-                        onClick={() => setView('safe')}
-                    >
-                        <span className="icon">🛡️</span>
-                        Safe Sites
-                        <span className="count safe">{stats.safe}</span>
+                    <button className={`nav-item ${view === 'history' ? 'active' : ''}`} onClick={() => setView('history')}>
+                        <History size={20} /> Full History
                     </button>
-                    <button
-                        className={`nav-btn ${view === 'unsafe' ? 'active' : ''} `}
-                        onClick={() => setView('unsafe')}
-                    >
-                        <span className="icon">🚨</span>
-                        Threats Blocked
-                        <span className="count unsafe">{stats.unsafe}</span>
+                    <button className={`nav-item ${view === 'safe' ? 'active' : ''}`} onClick={() => setView('safe')}>
+                        <ShieldCheck size={20} /> Safe Sites
                     </button>
-                    <button
-                        className={`nav-btn ${view === 'account' ? 'active' : ''} `}
-                        onClick={() => setView('account')}
-                    >
-                        <span className="icon">👤</span>
-                        Account Settings
+                    <button className={`nav-item ${view === 'unsafe' ? 'active' : ''}`} onClick={() => setView('unsafe')}>
+                        <ShieldAlert size={20} /> Threats Blocked
                     </button>
-                </div>
+                    <button className={`nav-item ${view === 'account' ? 'active' : ''}`} onClick={() => setView('account')}>
+                        <User size={20} /> Account Profile
+                    </button>
+                </nav>
 
                 <div className="sidebar-footer">
-                    <button className="logout-btn" onClick={handleLogout}>🚪 Logout</button>
+                    <button className="sidebar-logout" onClick={handleLogout}>
+                        <LogOut size={20} /> Logout System
+                    </button>
                 </div>
             </aside>
 
-            <main className="dash-content">
-                <header className="content-header">
-                    <h2>
-                        {view === 'history' && 'Security Audit Log'}
-                        {view === 'safe' && 'Verified Safe Vault'}
-                        {view === 'unsafe' && 'Detected Threats Archive'}
-                        {view === 'account' && 'Account Management'}
-                    </h2>
-                    <div className="header-actions">
-                        {view !== 'account' && stats.total > 0 && (
-                            <button className="btn-clear-history" onClick={handleClearHistory}>🗑️ Clear History</button>
-                        )}
-                        <Link to="/analyze" className="btn-new-scan">🔍 Aegis Scan Analyzer</Link>
+            {/* Main Content */}
+            <main className="dashboard-main">
+                <div className="dashboard-container">
+                    <header className="main-header">
+                        <div className="header-left">
+                        <h1>
+                            {view === 'overview' && 'Security Overview'}
+                            {view === 'history' && 'Neural Audit Log'}
+                            {view === 'safe' && 'Verified Safe Vault'}
+                            {view === 'unsafe' && 'Threat Archive'}
+                            {view === 'account' && 'Intelligence Profile'}
+                        </h1>
+                        <p>
+                            {view === 'safe' ? 'Verified domains in the Aegis database' : 
+                             view === 'account' ? 'Manage your security credentials' :
+                             `Operational status for operative: `}
+                            {(view !== 'safe' && view !== 'account') && <strong>{user}</strong>}
+                            {(view !== 'safe' && view !== 'account') && ' 👋'}
+                        </p>
+                    </div>
+
+                    <div className="header-right">
+                        <Link to="/analyze" className="btn-scan-analyzer">
+                            <Search size={18} /> Launch Scanner
+                        </Link>
                     </div>
                 </header>
 
-                {view === 'account' ? (
-                    <div className="account-view fade-in">
-                        <div className="account-grid">
-                            <div className="account-card main-profile">
-                                <div className="profile-header">
-                                    <div className="avatar">{user.charAt(0).toUpperCase()}</div>
-                                    <div className="profile-meta">
-                                        <h3>{user}</h3>
-                                        <p className="status-verified">Verified Security Member</p>
+                <div className="view-container fade-in">
+                    {view === 'overview' && (
+                        <div className="overview-view">
+                            {/* Stats Grid */}
+                            <div className="stats-grid">
+                                <div className="glass-card stat-tile">
+                                    <div className="tile-icon icon-purple"><Activity size={24} /></div>
+                                    <div className="tile-content">
+                                        <label>Total Scans</label>
+                                        <h3>{stats.total}</h3>
+                                    </div>
+                                </div>
+                                <div className="glass-card stat-tile">
+                                    <div className="tile-icon icon-red"><ShieldAlert size={24} /></div>
+                                    <div className="tile-content">
+                                        <label>Threats Detected</label>
+                                        <h3 className="text-danger">{stats.threats}</h3>
+                                    </div>
+                                </div>
+                                <div className="glass-card stat-tile">
+                                    <div className="tile-icon icon-green"><ShieldCheck size={24} /></div>
+                                    <div className="tile-content">
+                                        <label>Safe Sites</label>
+                                        <h3 className="text-success">{stats.safe}</h3>
+                                    </div>
+                                </div>
+                                <div className="glass-card stat-tile">
+                                    <div className="tile-icon icon-gold"><TrendingUp size={24} /></div>
+                                    <div className="tile-content">
+                                        <label>Risk Level</label>
+                                        <h3 className={`risk-${stats.risk.toLowerCase()}`}>{stats.risk}</h3>
                                     </div>
                                 </div>
                             </div>
 
-                            <div className="settings-menu">
-                                <button className="menu-tile" onClick={() => setView('history')}>
-                                    <span className="icon">📊</span>
-                                    <div className="tile-info">
-                                        <strong>Dashboard</strong>
-                                        <p>Return to your security overview and logs.</p>
+                            {/* Charts Row */}
+                            <div className="charts-row">
+                                <div className="glass-card chart-container">
+                                    <div className="chart-header">
+                                        <h3>Scan Activity (Last 7 Days)</h3>
+                                        <span className="chart-subtitle">Neural traffic monitoring</span>
                                     </div>
-                                    <span className="chevron">→</span>
-                                </button>
-
-                                <div className={`menu-accordion ${showNotifications ? 'expanded' : ''}`}>
-                                    <button className="menu-tile" onClick={() => setShowNotifications(!showNotifications)}>
-                                        <span className="icon">🔔</span>
-                                        <div className="tile-info">
-                                            <strong>Notifications</strong>
-                                            <p>Manage security alerts and system updates.</p>
-                                        </div>
-                                        <span className={`chevron ${showNotifications ? 'rotate' : ''}`}>→</span>
-                                    </button>
-
-                                    {showNotifications && (
-                                        <div className="accordion-content fade-in">
-                                            <div className="accordion-section">
-                                                <h4>Push Alerts</h4>
-                                                <p>Get instantly notified when Aegis detects a high-risk manipulative pattern.</p>
-                                                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '10px', cursor: 'pointer' }}>
-                                                    <input type="checkbox" defaultChecked />
-                                                    <span style={{ opacity: 0.8, fontSize: '14px' }}>Enable Push Notifications</span>
-                                                </label>
-                                            </div>
-                                            <div className="accordion-section">
-                                                <h4>Email Summaries</h4>
-                                                <p>Receive a weekly digest of your Dark Pattern scan logs and trust score changes.</p>
-                                                <label style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '10px', cursor: 'pointer' }}>
-                                                    <input type="checkbox" />
-                                                    <span style={{ opacity: 0.8, fontSize: '14px' }}>Enable Weekly Emails</span>
-                                                </label>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-
-                                <div className={`menu-accordion ${showHelp ? 'expanded' : ''}`}>
-                                    <button className="menu-tile" onClick={() => setShowHelp(!showHelp)}>
-                                        <span className="icon">❓</span>
-                                        <div className="tile-info">
-                                            <strong>Help / Support</strong>
-                                            <p>Get assistance or read our documentation.</p>
-                                        </div>
-                                        <span className={`chevron ${showHelp ? 'rotate' : ''}`}>→</span>
-                                    </button>
-
-                                    {showHelp && (
-                                        <div className="accordion-content fade-in">
-                                            <div className="accordion-section">
-                                                <h4>How to use Aegis Scan</h4>
-                                                <p>Navigate to the "Aegis Scan Analyzer" via the top right button or from your client home. Paste any e-commerce product URL or raw text snippet, and Aegis will detect pressure tactics mathematically.</p>
-                                            </div>
-                                            <div className="accordion-section">
-                                                <h4>Report False Positives</h4>
-                                                <p>If Aegis wrongly flagged a safe site as "manipulative," you can soon report it in your Audit History. This helps train our aegis engine to reduce false positives.</p>
-                                            </div>
-                                            <div className="accordion-section">
-                                                <h4>Contact Security Team</h4>
-                                                <p>Email <strong>support@aegis-scanner.io</strong> for enterprise integration guides or manual review requests.</p>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-
-                                <div className={`menu-accordion ${showAbout ? 'expanded' : ''}`}>
-                                    <button className="menu-tile" onClick={() => setShowAbout(!showAbout)}>
-                                        <span className="icon">ℹ️</span>
-                                        <div className="tile-info">
-                                            <strong>About & Privacy Policy</strong>
-                                            <p>Aegis Version 2.4.0 (Production Build) & Data Handling.</p>
-                                        </div>
-                                        <span className={`chevron ${showAbout ? 'rotate' : ''}`}>→</span>
-                                    </button>
-
-                                    {showAbout && (
-                                        <div className="accordion-content fade-in">
-                                            <div className="accordion-section">
-                                                <h4>About Aegis</h4>
-                                                <p>Aegis: The Dark-Pattern Detector is an advanced aegis engine designed to proactively identify and neutralize manipulative web elements, protecting your psychological agency online.</p>
-                                            </div>
-                                            <div className="accordion-section">
-                                                <h4>Privacy & Data Sovereignty</h4>
-                                                <p>We run on a zero-trust architecture. Your scan logs and structural web data are processed securely. We explicitly do not track personal identifiers across sessions, and your vault data is not sold to any third-party marketing firms.</p>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-
-                                <button className="menu-tile logout-tile" onClick={handleLogout}>
-                                    <span className="icon">🚪</span>
-                                    <div className="tile-info">
-                                        <strong>Logout</strong>
-                                        <p>Securely end your current session.</p>
+                                    <div className="chart-body">
+                                        <ResponsiveContainer width="100%" height={250}>
+                                            <AreaChart data={chartData}>
+                                                <defs>
+                                                    <linearGradient id="colorScans" x1="0" y1="0" x2="0" y2="1">
+                                                        <stop offset="5%" stopColor="#7C3AED" stopOpacity={0.3}/>
+                                                        <stop offset="95%" stopColor="#7C3AED" stopOpacity={0}/>
+                                                    </linearGradient>
+                                                </defs>
+                                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                                                <XAxis dataKey="name" stroke="rgba(255,255,255,0.3)" fontSize={12} tickLine={false} axisLine={false} />
+                                                <YAxis stroke="rgba(255,255,255,0.3)" fontSize={12} tickLine={false} axisLine={false} />
+                                                <Tooltip 
+                                                    contentStyle={{ background: '#111827', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px' }}
+                                                    itemStyle={{ color: '#fff' }}
+                                                />
+                                                <Area type="monotone" dataKey="scans" stroke="#7C3AED" strokeWidth={3} fillOpacity={1} fill="url(#colorScans)" />
+                                            </AreaChart>
+                                        </ResponsiveContainer>
                                     </div>
-                                    <span className="chevron">→</span>
-                                </button>
+                                </div>
+
+                                <div className="glass-card chart-container mini">
+                                    <div className="chart-header">
+                                        <h3>Threat Distribution</h3>
+                                        <span className="chart-subtitle">Safe vs Dangerous</span>
+                                    </div>
+                                    <div className="chart-body">
+                                        <ResponsiveContainer width="100%" height={250}>
+                                            <PieChart>
+                                                <Pie
+                                                    data={pieData}
+                                                    innerRadius={60}
+                                                    outerRadius={80}
+                                                    paddingAngle={10}
+                                                    dataKey="value"
+                                                >
+                                                    {pieData.map((entry, index) => (
+                                                        <Cell key={`cell-${index}`} fill={entry.color} />
+                                                    ))}
+                                                </Pie>
+                                                <Tooltip 
+                                                     contentStyle={{ background: '#111827', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px' }}
+                                                />
+                                            </PieChart>
+                                        </ResponsiveContainer>
+                                        <div className="pie-legend">
+                                            <div className="legend-item"><span className="dot dot-green"></span> Safe</div>
+                                            <div className="legend-item"><span className="dot dot-red"></span> Threats</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+
+                        </div>
+                    )}
+
+                    {view === 'account' && profile && (
+                        <div className="account-view fade-in">
+                            <div className="profile-grid">
+                                <div className="glass-card profile-main-card">
+                                    <div className="profile-header-large">
+                                        <div className="avatar-huge">{user.charAt(0).toUpperCase()}</div>
+                                        <div className="profile-titles">
+                                            <h2>{profile.username}</h2>
+                                            <span className="badge-role">{profile.role}</span>
+                                        </div>
+                                    </div>
+
+                                    <div className="profile-details-list">
+                                        <div className="detail-item">
+                                            <Mail size={18} className="text-purple" />
+                                            <div className="detail-content">
+                                                <label>Email Address</label>
+                                                <span>{profile.email}</span>
+                                            </div>
+                                        </div>
+                                        <div className="detail-item">
+                                            <Calendar size={18} className="text-purple" />
+                                            <div className="detail-content">
+                                                <label>Member Since</label>
+                                                <span>{profile.created_at}</span>
+                                            </div>
+                                        </div>
+                                        <div className="detail-item">
+                                            <Info size={18} className="text-purple" />
+                                            <div className="detail-content">
+                                                <label>Clearance Level</label>
+                                                <span>Standard Operations</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                </div>
                             </div>
                         </div>
-                    </div>
-                ) : (
-                    <div className="audit-table-container fade-in">
-                        {filteredHistory.length > 0 ? (
-                            <table className="audit-table">
-                                <thead>
-                                    <tr>
-                                        <th>Status</th>
-                                        <th>Method</th>
-                                        <th>Target</th>
-                                        <th>Trust Index</th>
-                                        <th>Timestamp</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {filteredHistory.map((item, idx) => (
-                                        <tr key={idx} className="audit-row">
-                                            <td>
-                                                <div className={`audit-badge ${item.safety_status === 'Safe' || (item.safety_status && item.safety_status.includes('SAFE')) ? 'safe' : 'unsafe'} `}>
-                                                    {item.safety_status || 'Unknown'}
-                                                </div>
-                                            </td>
-                                            <td><span className="method-tag">{(item.type || 'unknown').toUpperCase()}</span></td>
-                                            <td className="target-cell">{item.url !== 'N/A' ? item.url : 'Fragment Analysis'}</td>
-                                            <td>
-                                                <div className="trust-cell">
-                                                    <div className="mini-bar-bg"><div className="mini-bar-fill" style={{ width: `${item.trust_score}% ` }}></div></div>
-                                                    <span>{item.trust_score}%</span>
-                                                </div>
-                                            </td>
-                                            <td className="time-cell">{item.timestamp}</td>
+                    )}
+
+                    {/* History View (Table style) */}
+                    {(view === 'history' || view === 'safe' || view === 'unsafe') && (
+                        <div className="table-view">
+                            <div className="glass-card table-container">
+                                <table className="aegis-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Safety Level</th>
+                                            <th>Format</th>
+                                            <th>Target Identity</th>
+                                            <th>Trust Weight</th>
+                                            <th>Captured At</th>
                                         </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        ) : (
-                            <div className="no-audit">
-                                <p>No records found in this category.</p>
+                                    </thead>
+                                    <tbody>
+                                        {history
+                                            .filter(h => {
+                                                const status = h.safety_status?.toLowerCase();
+                                                if (view === 'safe') return status === 'safe';
+                                                if (view === 'unsafe') return status !== 'safe' && status !== 'unknown';
+                                                return true;
+                                            })
+                                            .map((h, i) => (
+                                                <tr key={i}>
+                                                    <td>
+                                                        <div className={`table-badge ${h.safety_status?.toLowerCase() === 'safe' ? 'badge-safe' : 'badge-danger'}`}>
+                                                            {h.safety_status}
+                                                        </div>
+                                                    </td>
+                                                    <td className="format-cell">{(h.type || 'unknown').toUpperCase()}</td>
+                                                    <td className="target-cell">
+                                                        <div className="identity-text">{h.url !== 'N/A' ? h.url : 'Neural Fragment'}</div>
+                                                    </td>
+                                                    <td>
+                                                        <div className="trust-meter">
+                                                            <div className="meter-bg"><div className="meter-fill" style={{ width: `${h.trust_score}%` }}></div></div>
+                                                            <span className="meter-val">{h.trust_score}%</span>
+                                                        </div>
+                                                    </td>
+                                                    <td className="date-cell">{h.timestamp}</td>
+                                                </tr>
+                                            ))}
+                                    </tbody>
+                                </table>
+                                {history.filter(h => {
+                                    const status = h.safety_status?.toLowerCase();
+                                    if (view === 'safe') return status === 'safe';
+                                    if (view === 'unsafe') return status !== 'safe' && status !== 'unknown';
+                                    return true;
+                                }).length === 0 && (
+                                    <div className="empty-audit-state" style={{ padding: '60px', textAlign: 'center', opacity: 0.5 }}>
+                                        <p>{view === 'safe' ? "No safe sites detected yet" : "No records found in this category"}</p>
+                                    </div>
+                                )}
                             </div>
-                        )}
-                    </div>
-                )}
+                        </div>
+                    )}
+
+
+                </div>
+                </div> { /* End dashboard-container */ }
             </main>
         </div>
     );

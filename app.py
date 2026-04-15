@@ -104,6 +104,15 @@ if MONGO_URI:
         
         client.admin.command('ping')
         print("Database Connection: ONLINE (MongoDB Atlas)", flush=True)
+
+        # ARCHIVE PERSISTENCE VERIFICATION: Track record state across restarts
+        total_scans_detected = analyses_col.count_documents({})
+        total_operatives_detected = users_col.count_documents({})
+        print(f"AEGIS ARCHIVE SYNC: {total_scans_detected} neural scans and {total_operatives_detected} operatives synchronized.", flush=True)
+        
+        if total_scans_detected == 0:
+            print("LOG WARNING: No historical scan data detected in the synchronized collection.", flush=True)
+
     except Exception as e:
         print(f"DATABASE ERROR: {e}", flush=True)
 else:
@@ -127,11 +136,15 @@ def log_session():
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if 'user' not in session or 'session_id' not in session:
+        # Allow access if EITHER a standard user is logged in OR an administrator
+        is_standard_user = 'user' in session and 'session_id' in session
+        is_admin_user = 'admin_user' in session and session.get('is_admin')
+
+        if not is_standard_user and not is_admin_user:
             return jsonify({'success': False, 'message': 'Unauthorized'}), 401
             
-        # Verify if the current session_id matches the one in the database
-        if users_col is not None:
+        # Verify if the current standard session_id matches the one in the database
+        if is_standard_user and users_col is not None:
             lookup_query = {'email': session['email']} if 'email' in session else {'username': session['user']}
             user = users_col.find_one(lookup_query)
             if not user or user.get('session_id') != session['session_id']:
@@ -141,7 +154,10 @@ def login_required(f):
                 session.pop('session_id', None)
                 session.pop('email', None)
                 session.pop('client_id', None)
-                return jsonify({'success': False, 'message': 'Session expired or logged in from another device. Please login again.'}), 401
+                
+                # If they were ONLY a standard user, they are now fully logged out
+                if not is_admin_user:
+                    return jsonify({'success': False, 'message': 'Session expired or logged in from another device. Please login again.'}), 401
                 
         return f(*args, **kwargs)
     return decorated_function
@@ -167,8 +183,12 @@ def signup():
         if password != confirm_password:
             return jsonify({'success': False, 'message': 'Passwords do not match'}), 400
 
-        if users_col.find_one({'email': email}):
-            return jsonify({'success': False, 'message': 'Email address already recorded in neural archive.'}), 400
+        # GLOBAL IDENTITY CHECK: Ensure the email isn't already used in EITHER collection
+        exists_in_users = users_col.find_one({'email': email})
+        exists_in_admins = admins_col.find_one({'email': email}) if admins_col is not None else None
+        
+        if exists_in_users or exists_in_admins:
+            return jsonify({'success': False, 'message': 'This identity is already registered in our secure archives.'}), 400
             
         hashed_password = generate_password_hash(password)
         
@@ -185,7 +205,7 @@ def signup():
             'created_at': datetime.datetime.now()
         })
         
-        # Create CSV file backup: username, email, and RAW password. No super_key.
+        # Create CSV file backup
         try:
             timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             csv_file = "user_backups.csv"
@@ -193,12 +213,11 @@ def signup():
             with open(csv_file, "a", encoding='utf-8') as f:
                 if not file_exists:
                     f.write("Timestamp,Username,Email,Password,Role\n")
-                # Escaping commas by wrapping in quotes for basic CSV safety
                 f.write(f'"{timestamp}","{username}","{email}","{password}","client"\n')
-        except Exception as e:
-            print(f"BACKUP ERROR: {e}")
+        except Exception:
+            pass
 
-        return jsonify({'success': True, 'message': 'User created successfully'})
+        return jsonify({'success': True, 'message': 'Account created successfully'})
     return jsonify({'message': 'Signup API is active. Use POST to register.'})
 
 @app.route('/api/login', methods=['GET', 'POST'])
@@ -288,10 +307,17 @@ def forgot_password():
 
     data = request.get_json()
     email = data.get('email', '').strip()
+    
+    # Check in both collections to support unified identity
     user = users_col.find_one({'email': email})
+    target_col = users_col
+    
+    if not user and admins_col is not None:
+        user = admins_col.find_one({'email': email})
+        target_col = admins_col
     
     if not user:
-        return jsonify({'success': False, 'message': 'Email not found'}), 404
+        return jsonify({'success': False, 'message': 'Email not recognized in our secure archives.'}), 404
         
     if 'reset_otp_expiry' in user and time.time() < user.get('reset_otp_expiry', 0):
         remaining_time = int(user.get('reset_otp_expiry', 0) - time.time())
@@ -301,17 +327,16 @@ def forgot_password():
     otp = "".join([str(random.randint(0, 9)) for _ in range(6)])
     expiry = time.time() + 120 # 2 minutes expiry
     
-    # Save OTP to MongoDB first
-    if users_col is not None:
-        users_col.update_one(
-            {'_id': user['_id']},
-            {'$set': {'reset_otp': otp, 'reset_otp_expiry': expiry, 'reset_otp_attempts': 0}}
-        )
+    # Save OTP to whichever collection we found them in
+    target_col.update_one(
+        {'_id': user['_id']},
+        {'$set': {'reset_otp': otp, 'reset_otp_expiry': expiry, 'reset_otp_attempts': 0}}
+    )
             
     # Trigger non-blocking background email
     send_otp_email(email, otp)
     
-    return jsonify({'success': True, 'message': 'OTP sent to your email.'})
+    return jsonify({'success': True, 'message': 'Security OTP sent to your verified email.'})
 
 @app.route('/api/verify-otp', methods=['POST'])
 def verify_otp():
@@ -322,30 +347,37 @@ def verify_otp():
     email = data.get('email')
     otp_input = data.get('otp')
     
+    # Check both for OTP verification
     user = users_col.find_one({'email': email})
+    if not user and admins_col is not None:
+        user = admins_col.find_one({'email': email})
+    
     if not user or 'reset_otp' not in user:
-        return jsonify({'success': False, 'message': 'No OTP requested for this email'}), 400
+        return jsonify({'success': False, 'message': 'No security reset requested for this identity'}), 400
         
     if time.time() > user.get('reset_otp_expiry', 0):
-        # Expiry reached, clear OTP data
-        users_col.update_one({'_id': user['_id']}, {'$unset': {'reset_otp': "", 'reset_otp_expiry': "", 'reset_otp_attempts': ""}})
-        return jsonify({'success': False, 'message': 'OTP expired'}), 400
+        # Clear expired OTP from whichever collection it was in
+        target_col = users_col if users_col.find_one({'email': email, 'reset_otp': {'$exists': True}}) else admins_col
+        target_col.update_one({'_id': user['_id']}, {'$unset': {'reset_otp': "", 'reset_otp_expiry': "", 'reset_otp_attempts': ""}})
+        return jsonify({'success': False, 'message': 'Security OTP expired'}), 400
         
     attempts = user.get('reset_otp_attempts', 0)
     if attempts >= 3:
-        users_col.update_one({'_id': user['_id']}, {'$unset': {'reset_otp': "", 'reset_otp_expiry': "", 'reset_otp_attempts': ""}})
-        return jsonify({'success': False, 'message': 'Maximum attempt fails. Please request a new OTP.'}), 400
+        target_col = users_col if users_col.find_one({'email': email, 'reset_otp': {'$exists': True}}) else admins_col
+        target_col.update_one({'_id': user['_id']}, {'$unset': {'reset_otp': "", 'reset_otp_expiry': "", 'reset_otp_attempts': ""}})
+        return jsonify({'success': False, 'message': 'Maximum attempt fails. Identity locked for safety.'}), 400
         
     if otp_input != user.get('reset_otp'):
         attempts += 1
-        users_col.update_one({'_id': user['_id']}, {'$set': {'reset_otp_attempts': attempts}})
+        target_col = users_col if users_col.find_one({'email': email, 'reset_otp': {'$exists': True}}) else admins_col
+        target_col.update_one({'_id': user['_id']}, {'$set': {'reset_otp_attempts': attempts}})
         if attempts >= 3:
-            users_col.update_one({'_id': user['_id']}, {'$unset': {'reset_otp': "", 'reset_otp_expiry': "", 'reset_otp_attempts': ""}})
-            return jsonify({'success': False, 'message': 'Maximum attempt fails. Please request a new OTP.'}), 400
+            target_col.update_one({'_id': user['_id']}, {'$unset': {'reset_otp': "", 'reset_otp_expiry': "", 'reset_otp_attempts': ""}})
+            return jsonify({'success': False, 'message': 'Maximum attempt fails. Identity locked for safety.'}), 400
         remaining = 3 - attempts
-        return jsonify({'success': False, 'message': f'Invalid OTP. {remaining} attempt(s) remaining.'}), 400
+        return jsonify({'success': False, 'message': f'Invalid code. {remaining} attempt(s) remaining.'}), 400
         
-    return jsonify({'success': True, 'message': 'OTP verified'})
+    return jsonify({'success': True, 'message': 'Identity Verified'})
 
 @app.route('/api/reset-password', methods=['POST'])
 def reset_password():
@@ -357,24 +389,42 @@ def reset_password():
     otp_input = data.get('otp')
     new_password = data.get('new_password')
     
+    # Locate user in either collection
     user = users_col.find_one({'email': email})
+    if not user and admins_col is not None:
+        user = admins_col.find_one({'email': email})
+
     if not user or 'reset_otp' not in user:
         return jsonify({'success': False, 'message': 'OTP expired or not requested'}), 400
         
     if time.time() > user.get('reset_otp_expiry', 0) or otp_input != user.get('reset_otp'):
-        users_col.update_one({'_id': user['_id']}, {'$unset': {'reset_otp': "", 'reset_otp_expiry': "", 'reset_otp_attempts': ""}})
         return jsonify({'success': False, 'message': 'Invalid or expired OTP'}), 400
         
     hashed_password = generate_password_hash(new_password)
-    users_col.update_one(
-        {'_id': user['_id']}, 
-        {
-            '$set': {'password': hashed_password},
-            '$unset': {'reset_otp': "", 'reset_otp_expiry': "", 'reset_otp_attempts': ""}
-        }
-    )
     
-    return jsonify({'success': True, 'message': 'Password reset successfully'})
+    # UNIFIED SYNC: Update password in BOTH collections if the email exists in both
+    sync_count = 0
+    if users_col.find_one({'email': email}):
+        users_col.update_one(
+            {'email': email}, 
+            {
+                '$set': {'password': hashed_password},
+                '$unset': {'reset_otp': "", 'reset_otp_expiry': "", 'reset_otp_attempts': ""}
+            }
+        )
+        sync_count += 1
+        
+    if admins_col is not None and admins_col.find_one({'email': email}):
+        admins_col.update_one(
+            {'email': email},
+            {
+                '$set': {'password': hashed_password},
+                '$unset': {'reset_otp': "", 'reset_otp_expiry': "", 'reset_otp_attempts': ""}
+            }
+        )
+        sync_count += 1
+    
+    return jsonify({'success': True, 'message': f'Security credentials updated successfully across {sync_count} platform(s).'})
 
 @app.route('/api/logout')
 def logout():
@@ -393,6 +443,16 @@ def verify_session():
     # If login_required passes, the session is definitely valid
     return jsonify({'success': True})
 
+def log_audit_event(event_type, details):
+    """Local server-side audit log for critical database operations (Deletion/Purge)"""
+    try:
+        timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        log_entry = f"[{timestamp}] AUDIT_{event_type.upper()}: {details}\n"
+        with open("audit_purge.log", "a", encoding='utf-8') as f:
+            f.write(log_entry)
+        print(f"CRITICAL AUDIT: {log_entry.strip()}", flush=True)
+    except: pass
+
 def log_analysis(user, data):
     if analyses_col is None:
         print(f"DATABASE WARNING: Skipping log for {user} (analyses_col is None)")
@@ -401,9 +461,11 @@ def log_analysis(user, data):
     # Map classification to strictly "Safe" or "Unsafe"
     raw_status = data.get('classification') or data.get('status') or 'Unknown'
     
-    # Logic: Only 'Safe' is Safe. Everything else (Scam, Fake, Suspicious) is Unsafe.
-    if raw_status == 'Safe':
+    # Logic: Only 'SAFE' is Safe. Everything else (UNSAFE, SUSPICIOUS, FAKE) is Unsafe.
+    if raw_status == 'SAFE':
         safety_status = 'Safe'
+    elif raw_status == 'SUSPICIOUS':
+        safety_status = 'Unsafe' # Classified as unsafe for dashboard filtering
     elif raw_status == 'Unknown':
         safety_status = 'Unknown'
     else:
@@ -417,10 +479,10 @@ def log_analysis(user, data):
         'url': data.get('url') or data.get('target_url') or data.get('domain') or "[ Text Analysis Segment ]",
         'trust_score': data.get('trust_score'),
         'safety_status': safety_status,
-        'raw_classification': raw_status, # Preserve the original classification for detail
-        'total_patterns_found': data.get('total_patterns_found') if data.get('total_patterns_found') is not None else data.get('total_patterns'),
-        'findings': data.get('findings'),
-        'conclusion': data.get('security_warning') or data.get('conclusion_from_internet') or "No specific conclusion provided."
+        'raw_classification': raw_status, 
+        'total_patterns_found': data.get('patterns_found', 0),
+        'findings': data.get('patterns', []),
+        'conclusion': data.get('message') or "No specific conclusion provided."
     }
     try:
         analyses_col.insert_one(analysis_entry)
@@ -480,27 +542,101 @@ def health():
 @login_required
 def dashboard():
     username = session.get('user')
-    # Fetch history from MongoDB
-    if analyses_col is None:
-        return jsonify({'user': username, 'history': []})
+    
+    # 🕵️ Fetch Full Intelligence Profile
+    user_info = {
+        'username': username,
+        'email': session.get('email', 'N/A'),
+        'role': 'Cyber Intelligence Operative',
+        'created_at': 'N/A',
+        'stats': {
+            'total_scans': 0,
+            'threats': 0,
+            'safe': 0
+        }
+    }
+
+    if users_col is not None:
+        db_user = users_col.find_one({'username': username})
+        if db_user:
+            user_info['email'] = db_user.get('email', user_info['email'])
+            user_info['role'] = 'Administrator' if db_user.get('is_admin') else 'Client Operative'
+            if db_user.get('created_at'):
+                user_info['created_at'] = db_user['created_at'].strftime('%Y-%m-%d') if hasattr(db_user['created_at'], 'strftime') else str(db_user['created_at'])
+
+    # SEARCH CRITERIA: Use both username and client_id (case-insensitive for username)
+    client_id = db_user.get('client_id') if db_user else session.get('client_id')
+    user_match = {'username': {'$regex': f'^{username}$', '$options': 'i'}}
+    query = {
+        '$or': [
+            user_match,
+            {'client_id': client_id}
+        ]
+    } if client_id else user_match
+
+    if analyses_col is not None:
+        user_info['stats']['total_scans'] = analyses_col.count_documents(query)
+        user_info['stats']['safe'] = analyses_col.count_documents({**query, 'safety_status': 'Safe'})
+        user_info['stats']['threats'] = user_info['stats']['total_scans'] - user_info['stats']['safe']
         
-    history = list(analyses_col.find({'username': username}).sort('timestamp', -1).limit(10))
-    # Convert MongoDB objects to JSON-serializable format
-    for item in history:
-        item['_id'] = str(item['_id'])
-    return jsonify({'user': username, 'history': history})
+        # INCREASED LIMIT: Standardized 500 items for historical archive
+        history = list(analyses_col.find(query).sort('timestamp', -1).limit(500))
+        for item in history:
+            item['_id'] = str(item['_id'])
+    else:
+        history = []
+
+    return jsonify({
+        'user': username, 
+        'profile': user_info,
+        'history': history,
+        'client_id': client_id
+    })
 
 @app.route('/api/get-history')
 @login_required
 def get_history():
     username = session.get('user')
+    client_id = session.get('client_id')
+    
     if analyses_col is None:
         return jsonify([])
         
-    history = list(analyses_col.find({'username': username}).sort('timestamp', -1).limit(10))
+    user_match = {'username': {'$regex': f'^{username}$', '$options': 'i'}}
+    query = {
+        '$or': [
+            user_match,
+            {'client_id': client_id}
+        ]
+    } if client_id else user_match
+
+    history = list(analyses_col.find(query).sort('timestamp', -1).limit(500))
     for item in history:
         item['_id'] = str(item['_id'])
     return jsonify(history)
+
+@app.route('/api/ext-analyze', methods=['POST'])
+@cross_origin()
+def ext_analyze():
+    """Support for Chrome Extension analysis requests - Consolidated"""
+    data = request.get_json()
+    url = data.get('url')
+    if not url:
+        return jsonify({'success': False, 'error': 'No URL provided'}), 400
+        
+    # Process using the trust pipeline
+    result = process_url_domain(url, 'url')
+    
+    # Attempt to log to current session if user is logged in
+    user = session.get('user', 'NS-GUEST')
+    log_analysis(user, result)
+    
+    return jsonify({
+        'success': True,
+        'total_dark_patterns': result.get('patterns_found', 0),
+        'status': result.get('status'),
+        'trust_score': result.get('trust_score')
+    })
 
 @app.route('/api/clear-history', methods=['POST'])
 @login_required
@@ -525,9 +661,15 @@ def analyze_t():
     if result.get('success'):
         snippet = (text[:60] + '...') if len(text) > 60 else text
         result['url'] = snippet
-        # Set conclusion and classification mapped from status
+        # Set conclusion and classification mapped from refined Status Labels
         result['conclusion'] = result.get('message', '')
-        result['classification'] = "Safe" if result.get('status') == "SAFE" or result.get('status') == "LOW_RISK_TEXT" else "Suspicious"
+        
+        # Classification for Archive: Only SAFE is treated as fully Safe
+        if result.get('status') == "SAFE":
+            result['classification'] = "Safe"
+        else:
+            result['classification'] = "Suspicious"
+             
         log_analysis(session['user'], result)
         
     return jsonify(result)
@@ -545,14 +687,9 @@ def analyze():
         input_type = "url"
     result = process_url_domain(url, input_type)
     
-    # Adapt to log_analysis expectations
-    result['success'] = True if result['status'] != 'INVALID_INPUT' else False
-    if result.get('success'):
-        if 'url' not in result: 
-            result['url'] = result.get('normalized_url') or url
-        # Define compatibility fields
-        result['classification'] = "Safe" if result.get('status') in ("SAFE", "LIKELY_SAFE") else "Suspicious" if result.get('status') == "SUSPICIOUS" else "Unknown"
-        result['security_warning'] = result.get('message', '')
+    if result:
+        # Ensure it has basic compatibility before logging
+        result['url'] = url
         log_analysis(session['user'], result)
         
     return jsonify(result)
@@ -589,25 +726,6 @@ def scrape_details():
         'imagesCount': images_count,
         'words': words
     })
-
-@app.route('/api/ext-analyze', methods=['POST'])
-@cross_origin()
-def ext_analyze():
-    data = request.get_json()
-    url = data.get('url')
-    if not url:
-        return jsonify({'success': False, 'error': 'URL is required'}), 400
-    
-    input_type = detect_input_type(url)
-    if input_type not in ("url", "domain"):
-        input_type = "url"
-    result = process_url_domain(url, input_type)
-    result['success'] = True if result['status'] != 'INVALID_INPUT' else False
-    # Optionally, we can log it with a dummy user 'extension_user'
-    # if result.get('success'):
-    #     log_analysis('extension_user', result)
-        
-    return jsonify(result)
 
 # --- FRONTEND SERVING ---
 @app.route('/', defaults={'path': ''})
@@ -778,22 +896,35 @@ def admin_register():
         return jsonify({'success': False, 'message': 'Database offline'}), 503
         
     # BOOTSTRAP PROTOCOL: If no admins exist, allow the first one to register.
-    # Otherwise, require existing administrator credentials.
+    # Otherwise, require existing administrator credentials OR allow if the registering 
+    # email is already marked as an admin in the legacy users collection.
     admin_count = admins_col.count_documents({})
-    if admin_count > 0:
+    data = request.get_json()
+    email = data.get('email')
+    
+    is_legacy_admin = False
+    if email:
+        legacy_user = users_col.find_one({'email': email, 'is_admin': True})
+        if legacy_user:
+            is_legacy_admin = True
+
+    if admin_count > 0 and not is_legacy_admin:
         if 'admin_user' not in session or not session.get('is_admin'):
             return jsonify({'success': False, 'message': 'Administrator privileges required to register new security identities.'}), 403
         
-    data = request.get_json()
     username = data.get('username')
-    email = data.get('email')
     password = data.get('password')
     
     if not all([username, email, password]):
         return jsonify({'success': False, 'message': 'All fields are required'}), 400
         
-    if admins_col.find_one({'email': email}):
-        return jsonify({'success': False, 'message': 'Admin already exists'}), 400
+    # GLOBAL IDENTITY CHECK: Ensure the email isn't already used in EITHER collection
+    exists_in_admins = admins_col.find_one({'email': email})
+    exists_in_users = users_col.find_one({'email': email}) if users_col is not None else None
+    
+    # We allow it ONLY if this is the "Legacy Admin" we identified during bootstrap check
+    if exists_in_admins or (exists_in_users and not is_legacy_admin):
+        return jsonify({'success': False, 'message': 'This identity is already active in the machine network archive.'}), 400
         
     hashed_password = generate_password_hash(password)
     super_key = app.secret_key
@@ -860,9 +991,36 @@ def clear_logs():
             # Also reset the sequential counter for high-fidelity synchronization
             counters_col.update_one({'_id': 'client_id'}, {'$set': {'seq': 100000}}, upsert=True)
 
+        # Log the operation for archival forensic trace
+        log_audit_event("SYSTEM_PURGE", f"Admin {admin_email} triggered {mode} purge (Surgical: {bool(client_id)}). Scans: {deleted_scans}, Users: {deleted_users}")
+
         msg = f"Neural Archive Reset complete. Scans Purged: {deleted_scans}. Operatives Purged: {deleted_users}."
         
     return jsonify({'success': True, 'message': msg})
+
+@app.route('/api/admin/revoke-user/<user_id>', methods=['DELETE'])
+@admin_required
+def revoke_user(user_id):
+    if users_col is None:
+        return jsonify({'success': False, 'message': 'Database offline'}), 503
+    try:
+        # Find the user first to get their username for logging logs deletion
+        user = users_col.find_one({'_id': ObjectId(user_id)})
+        if not user:
+            return jsonify({'success': False, 'message': 'User not found'}), 404
+        
+        username = user.get('username')
+        
+        # Delete the user account
+        users_col.delete_one({'_id': ObjectId(user_id)})
+        
+        # Optionally delete their scan history as well
+        if analyses_col is not None:
+            analyses_col.delete_many({'username': username})
+            
+        return jsonify({'success': True, 'message': f'Access revoked for operative: {username}. All intelligence records purged.'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Error revoking access: {str(e)}'}), 400
 
 @app.route('/api/admin/delete-scan/<scan_id>', methods=['DELETE'])
 @admin_required
@@ -876,9 +1034,21 @@ def delete_scan(scan_id):
     except:
         return jsonify({'success': False, 'message': 'Invalid ID'}), 400
 
+@app.route('/api/admin/model-metrics', methods=['GET'])
+@admin_required
+def get_model_metrics():
+    """Exposes internal ML evaluation metrics to the Admin Dashboard."""
+    metrics_path = os.path.join(os.path.dirname(__file__), 'trust_pipeline', 'models', 'metrics.json')
+    if os.path.exists(metrics_path):
+        with open(metrics_path, 'r') as f:
+            return jsonify(json.load(f))
+    return jsonify({
+        "error": "Metrics not found. Please run evaluate_text_model.py to generate neural telemetry."
+    }), 404
+
 if __name__ == '__main__':
     print("\n" + "="*50, flush=True)
     print("  BACKEND SERVER IS RUNNING", flush=True)
     print("  Local Access: http://localhost:5000", flush=True)
     print("="*50 + "\n", flush=True)
-    app.run(debug=True, port=5000)
+    app.run(debug=True, use_reloader=True, port=5000)

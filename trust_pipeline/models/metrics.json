@@ -1,0 +1,29 @@
+{
+    "model_name": "Aegis Classifier v9.0",
+    "status": "Operational",
+    "status_message": "Moderate risk: some unsafe cases still undetected.",
+    "algorithm": "Logistic Regression",
+    "vectorizer": "TF-IDF (ngram_range=(1,2))",
+    "positive_class": "UNSAFE (Label 1)",
+    "threshold_config": "Adaptive (Base: 0.35 | Signal-Adjusted: 0.28/0.22)",
+    "accuracy": 0.9475890985324947,
+    "precision": 0.932,
+    "recall": 0.966804979253112,
+    "f1_score": 0.9490835030549899,
+    "false_positive_rate": 0.07203389830508475,
+    "false_negative_rate": 0.03319502074688797,
+    "confusion_matrix": {
+        "tn": 219,
+        "fp": 17,
+        "fn": 8,
+        "tp": 233
+    },
+    "risk_level": "Warning",
+    "metadata": {
+        "training_samples": 1907,
+        "test_samples": 477,
+        "test_split": "20%",
+        "total_samples": 2384
+    },
+    "last_evaluated": "2026-04-15 23:42:59"
+}

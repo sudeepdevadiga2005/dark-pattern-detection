@@ -20,26 +20,38 @@ const AdminLogin = () => {
         document.title = 'Dark Pattern Admin';
     }, []);
 
-    const handleAuth = async (e) => {
+    // Premium Interaction: Dynamic mouse tracking gradient
+    const handleMouseMove = (e) => {
+        const body = e.currentTarget;
+        const rect = body.getBoundingClientRect();
+        const x = ((e.clientX - rect.left) / rect.width) * 100;
+        const y = ((e.clientY - rect.top) / rect.height) * 100;
+        body.style.setProperty('--mouse-x', `${x}%`);
+        body.style.setProperty('--mouse-y', `${y}%`);
+    };
+
+    const handleAuth = async (e, isRegisterMode) => {
         e.preventDefault();
         setLoading(true);
         setError('');
         setSuccess('');
 
-        const endpoint = isRegister ? '/admin/register' : '/admin/login';
-        const payload = isRegister ? { username, email, password } : { email, password };
+        const endpoint = isRegisterMode ? '/admin/register' : '/admin/login';
+        const payload = isRegisterMode ? { username, email, password } : { email, password };
 
         try {
             const res = await axios.post(`${API_BASE_URL}${endpoint}`, payload, { withCredentials: true });
 
             if (res.data.success) {
-                if (isRegister) {
+                if (isRegisterMode) {
                     setSuccess('Admin Identity Registered. You may now login.');
                     setIsRegister(false);
                     setPassword('');
                 } else {
                     window.location.href = '/admin';
                 }
+            } else {
+                setError(res.data.message || (isRegisterMode ? 'Registration failed. Try a different alias.' : 'Invalid credentials.'));
             }
         } catch (err) {
             const msg = err.response?.data?.message || 'Gateway connection failed. Terminal timeout.';
@@ -50,110 +62,150 @@ const AdminLogin = () => {
     };
 
     return (
-        <div className="admin-login-body">
+        <div className="admin-login-body" onMouseMove={handleMouseMove}>
             <div className="admin-login-container">
                 <div className="admin-login-card">
 
                     {/* Left Split: Cyber Security Image */}
                     <div className="login-image-side">
-                        <img src="/aegis-bg.png" alt="aegis Core" className="bg-image-split" />
+                        <img src="/neuroshield-bg.png" alt="Aegis Core" className="bg-image-split" />
                         <div className="image-overlay-content">
-                            <h2>{isRegister ? 'New Enrollment' : 'aegis Core'}</h2>
+                            <h2>{isRegister ? 'New Enrollment' : 'Aegis Core'}</h2>
                             <p>Administrative Security Gateway to protect your internal systems and monitor aegis grid integrity.</p>
                         </div>
                     </div>
 
                     {/* Right Split: Auth Form */}
-                    <div className="login-form-side">
-                        <div className="login-header-mini">
-                            <Shield className="shield-pulse" size={36} />
-                            <h2>{isRegister ? 'Create Admin' : 'Welcome'}</h2>
-                            <p>{isRegister ? 'Register Secure Identity' : 'Login with Identity Token'}</p>
+                    <div className="login-form-side dark-theme-form">
+                        <div className="auth-tabs">
+                            <span 
+                                className={`auth-tab ${!isRegister ? 'active' : ''}`}
+                                onClick={() => { setIsRegister(false); setError(''); setSuccess(''); }}
+                            >
+                                Sign In
+                            </span>
+                            <span 
+                                className={`auth-tab ${isRegister ? 'active' : ''}`}
+                                onClick={() => { setIsRegister(true); setError(''); setSuccess(''); }}
+                            >
+                                Sign Up
+                            </span>
                         </div>
 
-                        <form onSubmit={handleAuth} className="login-form">
-                            {error && (
-                                <div className="login-error-alert fade-in">
-                                    <AlertCircle size={18} />
-                                    <span>{error}</span>
-                                </div>
-                            )}
-
-                            {success && (
-                                <div className="login-success-alert fade-in" style={{ background: 'rgba(100, 255, 218, 0.1)', color: '#64FFDA', padding: '10px', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px', fontSize: '14px' }}>
-                                    <Shield size={18} />
-                                    <span>{success}</span>
-                                </div>
-                            )}
-
-                            {isRegister && (
-                                <div className="input-field">
-                                    <Lock className="input-icon" size={26} style={{ transform: 'rotate(-45deg)', opacity: 0.5 }} />
-                                    <input
-                                        type="text"
-                                        placeholder="Admin Alias (Username)"
-                                        value={username}
-                                        onChange={(e) => setUsername(e.target.value)}
-                                        required
-                                    />
-                                </div>
-                            )}
-
-                            <div className="input-field">
-                                <Mail className="input-icon" size={26} />
-                                <input
-                                    type="email"
-                                    placeholder="Admin Email"
-                                    value={email}
-                                    onChange={(e) => setEmail(e.target.value)}
-                                    required
-                                />
+                        {error && (
+                            <div className="login-error-alert fade-in" style={{background: 'rgba(157, 23, 77, 0.3)', color: '#fbcfe8', borderColor: '#be185d'}}>
+                                <AlertCircle size={18} />
+                                <span>{error}</span>
                             </div>
+                        )}
 
-                            <div className="input-field" style={{ position: 'relative' }}>
-                                <Lock className="input-icon" size={26} />
-                                <input
-                                    type={showPassword ? "text" : "password"}
-                                    placeholder="Auth Token (Password)"
-                                    value={password}
-                                    onChange={(e) => setPassword(e.target.value)}
-                                    required
-                                    style={{ paddingRight: '50px' }}
-                                />
-                                <div
-                                    className="password-toggle-icon"
-                                    onClick={() => setShowPassword(!showPassword)}
-                                    style={{
-                                        position: 'absolute',
-                                        right: '15px',
-                                        top: '50%',
-                                        transform: 'translateY(-50%)',
-                                        cursor: 'pointer',
-                                        color: '#64FFDA',
-                                        opacity: 0.7
-                                    }}
-                                >
-                                    {showPassword ? '🔒' : '👁️'}
+                        {success && (
+                            <div className="login-success-alert fade-in" style={{ background: 'rgba(255, 255, 255, 0.1)', color: '#fbcfe8', padding: '10px', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px', fontSize: '14px' }}>
+                                <Shield size={18} />
+                                <span>{success}</span>
+                            </div>
+                        )}
+
+                        <div className="login-slider-wrapper">
+                            <div className={`login-slider ${isRegister ? 'slide-left' : ''}`}>
+                                
+                                {/* Sign In Panel */}
+                                <div className="login-panel">
+                                    <form onSubmit={(e) => handleAuth(e, false)} className="login-form dark-inputs">
+                                        <div className="input-group">
+                                            <label>Your email</label>
+                                            <input
+                                                type="email"
+                                                placeholder="bob.8888@gmail.com"
+                                                value={email}
+                                                onChange={(e) => setEmail(e.target.value)}
+                                                required
+                                            />
+                                        </div>
+
+                                        <div className="input-group">
+                                            <label>Your password</label>
+                                            <input
+                                                type={showPassword ? "text" : "password"}
+                                                placeholder="••••••••"
+                                                value={password}
+                                                onChange={(e) => setPassword(e.target.value)}
+                                                required
+                                            />
+                                        </div>
+
+                                        <div className="auth-options-row">
+                                            <label className="keep-logged-in">
+                                                <input type="checkbox" />
+                                                <span className="checkmark"></span>
+                                                Keep me logged in
+                                            </label>
+                                            <a href="#" className="forgot-pwd">Forgot password?</a>
+                                        </div>
+
+                                        <button
+                                            type="submit"
+                                            className={`login-submit-btn pill-btn ${loading && !isRegister ? 'btn-scanning' : ''}`}
+                                            disabled={loading}
+                                        >
+                                            {loading && !isRegister ? 'PROCESSING...' : 'SIGN IN'}
+                                        </button>
+                                        
+                                        <div className="bottom-links">
+                                            <a href="/">Privacy</a> • <a href="/">Terms</a> • <a href="/">About</a>
+                                        </div>
+                                    </form>
                                 </div>
-                            </div>
+                                
+                                {/* Sign Up Panel */}
+                                <div className="login-panel">
+                                    <form onSubmit={(e) => handleAuth(e, true)} className="login-form dark-inputs">
+                                        <div className="input-group">
+                                            <label>Admin alias</label>
+                                            <input
+                                                type="text"
+                                                placeholder="e.g. root_admin"
+                                                value={username}
+                                                onChange={(e) => setUsername(e.target.value)}
+                                                required
+                                            />
+                                        </div>
 
-                            <div className="auth-options">
-                                <a href="/">← Back to Public Sector</a>
-                                <span
-                                    onClick={() => { setIsRegister(!isRegister); setError(''); setSuccess(''); }}
-                                >
-                                    {isRegister ? 'Login Instead' : 'Create Admin Account'}
-                                </span>
-                            </div>
+                                        <div className="input-group">
+                                            <label>Your email</label>
+                                            <input
+                                                type="email"
+                                                placeholder="bob.8888@gmail.com"
+                                                value={email}
+                                                onChange={(e) => setEmail(e.target.value)}
+                                                required
+                                            />
+                                        </div>
 
-                            <button
-                                type="submit"
-                                className={`login-submit-btn ${loading ? 'btn-scanning' : ''}`}
-                                disabled={loading}
-                            >
-                                {loading ? 'PROCESSING...' : (isRegister ? 'REGISTER IDENTITY' : 'LOGIN')}
-                            </button>
-                        </form>
+                                        <div className="input-group">
+                                            <label>Your password</label>
+                                            <input
+                                                type={showPassword ? "text" : "password"}
+                                                placeholder="••••••••"
+                                                value={password}
+                                                onChange={(e) => setPassword(e.target.value)}
+                                                required
+                                            />
+                                        </div>
+
+                                        <button
+                                            type="submit"
+                                            style={{ marginTop: '20px' }}
+                                            className={`login-submit-btn pill-btn ${loading && isRegister ? 'btn-scanning' : ''}`}
+                                            disabled={loading}
+                                        >
+                                            {loading && isRegister ? 'PROCESSING...' : 'SIGN UP'}
+                                        </button>
+                                    </form>
+                                </div>
+
+                            </div>
+                        </div>
                     </div>
 
                 </div>

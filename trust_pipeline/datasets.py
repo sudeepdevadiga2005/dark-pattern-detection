@@ -7,12 +7,14 @@ from trust_pipeline.utils import clean_surrounding_punctuation, extract_domain_f
 VERIFIED_DOMAINS = set()
 FAKE_DOMAINS = {}
 FAKE_URLS = {}
+TEXT_TRAINING_DATA = [] # List of (text, label, category) tuples
 
 def load_datasets():
-    """Load both datasets into memory on startup."""
-    global VERIFIED_DOMAINS, FAKE_DOMAINS, FAKE_URLS
+    """Load all datasets into memory on startup."""
+    global VERIFIED_DOMAINS, FAKE_DOMAINS, FAKE_URLS, TEXT_TRAINING_DATA
     VERIFIED_DOMAINS = load_verified_domains(VERIFIED_CSV)
     FAKE_DOMAINS, FAKE_URLS = load_fake_dataset(FAKE_CSV)
+    TEXT_TRAINING_DATA = load_text_training_data("training_data.tsv")
 
 def load_verified_domains(csv_path):
     verified = set()
@@ -82,3 +84,43 @@ def lookup_fake_exact_url(normalized_url):
     if not normalized_url:
         return None
     return FAKE_URLS.get(normalized_url)
+
+def load_text_training_data(tsv_path):
+    data = []
+    if not os.path.exists(tsv_path):
+        print(f"[WARN] Training TSV not found: {tsv_path}")
+        return data
+        
+    print(f"[INFO] Loading text training data from {tsv_path}...")
+    try:
+        with open(tsv_path, "r", encoding="utf-8", errors="ignore") as f:
+            reader = csv.DictReader(f, delimiter='\t')
+            for row in reader:
+                text = row.get('text', '').strip()
+                label = row.get('label', '0').strip()
+                category = row.get('Pattern Category', 'Not Dark Pattern').strip()
+                if text:
+                    data.append((text.lower(), label, category))
+    except Exception as e:
+        print(f"[ERROR] Failed to load training data: {e}")
+        
+    print(f"[INFO] Loaded {len(data)} text training examples.")
+    return data
+
+def lookup_text_pattern(text):
+    """Simple exact or fuzzy match against training data."""
+    if not text:
+        return None
+    
+    t_lower = text.lower()
+    # Priority 1: Exact Match
+    for entry_text, label, category in TEXT_TRAINING_DATA:
+        if t_lower == entry_text:
+            return {"label": label, "category": category}
+            
+    # Priority 2: Substring Match (Partial)
+    for entry_text, label, category in TEXT_TRAINING_DATA:
+        if len(entry_text) > 10 and entry_text in t_lower:
+            return {"label": label, "category": category}
+            
+    return None

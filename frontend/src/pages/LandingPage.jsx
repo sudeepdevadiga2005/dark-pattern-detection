@@ -19,13 +19,11 @@ const LandingPage = () => {
             </div>
 
             <nav className="navbar">
-                <div className="brand">
+                <Link to="/" className="brand" style={{ textDecoration: 'none' }}>
                     <div className="brand-mark">D</div>
                     <span className="brand-name">Pattern Detection</span>
-                </div>
+                </Link>
                 <div className="nav-links">
-                    <a href="#features">Solutions</a>
-                    <a href="#about">Research</a>
                     {isLoggedIn ? (
                         <>
                             <Link to="/dashboard" className="btn-auth btn-login">Dashboard</Link>
@@ -96,28 +94,6 @@ const LandingPage = () => {
                     </>
                 )}
             </section>
-
-            <section className="features" id="features">
-                <div className="feature-card">
-                    <div className="feature-icon">🔍</div>
-                    <h3>Aegis Scan</h3>
-                    <p>Multi-layered heuristic analysis for 15+ categories of deceptive design.</p>
-                </div>
-                <div className="feature-card">
-                    <div className="feature-icon">🛡️</div>
-                    <h3>Trust Guard</h3>
-                    <p>Real-time protection scoring for e-commerce and SaaS platforms.</p>
-                </div>
-                <div className="feature-card">
-                    <div className="feature-icon">📊</div>
-                    <h3>Evidence Lab</h3>
-                    <p>Exportable detailed reports with specific pattern documentation and remediation.</p>
-                </div>
-            </section>
-
-            <footer className="footer">
-                <p>&copy; 2026 Dark Pattern Detection Research Lab. All Rights Reserved.</p>
-            </footer>
         </div>
     );
 };

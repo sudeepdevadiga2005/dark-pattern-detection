@@ -1,133 +1,115 @@
 import re
-from trust_pipeline.config import TRUST_SCORE_TEXT_LOW_RISK, TRUST_SCORE_TEXT_POTENTIALLY_SUSPICIOUS, TRUST_SCORE_TEXT_SUSPICIOUS
+import os
+import pickle
+import logging
 
-def analyze_text_input(text):
+# Paths to ML artifacts
+MODEL_DIR = os.path.join(os.path.dirname(__file__), 'models')
+MODEL_PATH = os.path.join(MODEL_DIR, 'model.pkl')
+VEC_PATH = os.path.join(MODEL_DIR, 'vectorizer.pkl')
+
+_MODEL = None
+_VECTORIZER = None
+
+def load_ml_assets():
+    global _MODEL, _VECTORIZER
+    if os.path.exists(MODEL_PATH) and os.path.exists(VEC_PATH):
+        try:
+            with open(MODEL_PATH, 'rb') as f: _MODEL = pickle.load(f)
+            with open(VEC_PATH, 'rb') as f: _VECTORIZER = pickle.load(f)
+            logging.info("Aegis Intelligence v7.0: Security Engine Ready.")
+        except Exception as e:
+            logging.error(f"Asset load failed: {e}")
+
+load_ml_assets()
+
+def analyze_text_input(text, sensitivity_mode='balanced'):
     """
-    Dedicated text-only processing branch to identify dark patterns in textual data.
-    Ensures raw strings don't leak into domain analyzers mistakenly.
+    AEGIS ADAPTIVE SECURITY ENGINE - v7.0 (Extreme Recall Focus)
+    Implements Dynamic Thresholding, Confidence Boosting, and Category-Based Overrides.
     """
+    if not text or len(text.strip()) < 3:
+        return {"status": "SAFE", "trust_score": 100, "message": "No input detected.", "patterns_found": 0, "patterns": []}
+        
     cleaned = text.strip()
     lower_text = cleaned.lower()
-
-    findings = []
-    score = 0
-
-    # Elevated heuristic regex patterns for sophisticated social engineering detection
-    suspicious_patterns = [
-        (r"\burgent\b", 12, "urgent"),
-        (r"verify your account", 15, "verify your account"),
-        (r"update payment", 15, "update payment"),
-        (r"limited offer", 12, "limited offer"),
-        (r"claim now", 12, "claim now"),
-        (r"claim your reward", 15, "claim your reward"),
-        (r"free.*gift card", 20, "free gift card promise"),
-        (r"free reward", 15, "free reward"),
-        (r"login immediately", 15, "login immediately"),
-        (r"act now", 12, "act now urgency"),
-        (r"expires at midnight", 15, "artificial expiration urgency"),
-        (r"reply stop to opt[-\s]?out", 10, "automated SMS opt-out mimicry"),
-        (r"confirm password", 20, "confirm password request"),
-        (r"bank account", 10, "bank account reference"),
-        (r"we['’]?ve selected you", 15, "random selection lottery scam pattern")
-    ]
-
-    for pattern, weight, label in suspicious_patterns:
+    
+    # --- PHASE 1: EXPANDED PATTERN CATEGORIZATION ---
+    categories = {
+        "urgency": r"\bhurry\b|\bact now\b|\bexpires\b|\blast chance\b|\bquick\b|\bright now\b",
+        "scarcity": r"\bonly \d+ left\b|\balmost gone\b|\blimited stock\b|\bfew remaining\b",
+        "social_proof": r"\bpeople are viewing\b|\busers bought\b|\bjoined recently\b",
+        "security_pressure": r"\baccount suspended\b|\bunauthorized access\b|\bverify identity\b|\brevoke\b",
+        "loss_aversion": r"\bdon['’]t miss\b|\byou will lose\b|\bsave now\b|\bdon['’]t let this slip\b"
+    }
+    
+    found_categories = []
+    all_patterns = []
+    for cat, pattern in categories.items():
         if re.search(pattern, lower_text):
-            score += weight
-            findings.append(f"Suspicious pattern detected: '{label}'")
-
-    # Extract hidden or embedded URLs (often used to direct victims in SMS text scams)
-    from trust_pipeline.utils import extract_domain_from_anything
-    from trust_pipeline.datasets import lookup_verified_domain, lookup_fake_domain
-    from trust_pipeline.verification import internet_verify_official
-    
-    urls_found = re.findall(r'(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?:/[^\s]*)?', cleaned)
-    url_analysis = []
-    
-    if urls_found:
-        valid_links = 0
-        malicious_links = 0
-
-        for u in urls_found:
-            domain = extract_domain_from_anything(u)
-            is_safe = False
+            found_categories.append(cat)
+            all_patterns.append(cat.replace('_', ' ').capitalize())
             
-            # Impersonation inference algorithm
-            official_guess = "a legitimate secure service"
-            if "amazon" in lower_text or "amzn" in u.lower():
-                official_guess = "Amazon"
-            elif "paypal" in lower_text:
-                official_guess = "PayPal"
-            elif "apple" in lower_text:
-                official_guess = "Apple"
-            elif "bank" in lower_text:
-                official_guess = "your Financial Institution"
-            
-            if domain:
-                if lookup_verified_domain(domain):
-                    is_safe = True
-                    official_guess = "Verified Official Domain"
-                elif lookup_fake_domain(domain):
-                    is_safe = False
-                    malicious_links += 1
-                else:
-                    try:
-                        v_res = internet_verify_official(u, domain=domain)
-                        if v_res.get("status") in ("SAFE", "LIKELY_SAFE"):
-                            is_safe = True
-                            official_guess = "Verified Safe via Internet"
-                        else:
-                            malicious_links += 1
-                    except Exception:
-                        malicious_links += 1
-
-            if is_safe:
-                valid_links += 1
-                url_analysis.append({
-                    "url": u,
-                    "official": official_guess,
-                    "is_safe": True
-                })
-            else:
-                url_analysis.append({
-                    "url": u,
-                    "official": official_guess,
-                    "is_safe": False
-                })
-
-        if malicious_links > 0:
-            score += 25
-            findings.append(f"Contains strongly suspicious active links ({malicious_links})")
-        elif valid_links > 0 and len(urls_found) == valid_links:
-            findings.append(f"Embedded links verified as safe ({valid_links})")
-            score = max(0, score - 15)
-
-    if score >= 40:
-        status = "SUSPICIOUS"
-        trust_score = TRUST_SCORE_TEXT_SUSPICIOUS
-        message = "This text closely matches high-risk phishing templates and social engineering tactics."
-    elif score >= 15:
-        status = "POTENTIALLY_SUSPICIOUS"
-        trust_score = TRUST_SCORE_TEXT_POTENTIALLY_SUSPICIOUS
-        message = "This text contains several suspicious signals and artificial urgency indicating a potential scam."
+    # --- PHASE 2: ADAPTIVE DYNAMIC THRESHOLDING ---
+    # Default thresholds based on sensitivity mode
+    base_threshold = 0.35 if sensitivity_mode == 'balanced' else 0.28
+    
+    # Dynamics: Stronger rules → Lower ML barrier
+    if len(found_categories) >= 2:
+        security_threshold = 0.22 # Extremely sensitive if multiple patterns exist
+    elif len(found_categories) == 1:
+        security_threshold = 0.28
     else:
-        # Prevent short randomly typed text like "qwerty" from attaining a safe score
-        if len(lower_text) < 15 or len(cleaned.split()) < 3:
-            status = "NOT_ENOUGH_DATA"
-            trust_score = 0
-            message = "Input is too short or lacks meaningful context for neural verification."
-        else:
-            status = "LOW_RISK_TEXT"
-            trust_score = TRUST_SCORE_TEXT_LOW_RISK
-            message = "No strong suspicious text patterns were detected."
+        security_threshold = base_threshold
+
+    # --- PHASE 3: NEURAL PREDICTION & CONFIDENCE BOOSTING ---
+    ml_label = 0
+    unsafe_prob = 0.0
+    
+    if _MODEL and _VECTORIZER:
+        try:
+            vec = _VECTORIZER.transform([lower_text])
+            probs = _MODEL.predict_proba(vec)[0]
+            unsafe_prob = float(probs[1])
+            
+            # Confidence Boosting Logic:
+            # If ML is borderline (e.g. 0.25) but rules found 1+ pattern, escalate to UNSAFE.
+            if unsafe_prob >= security_threshold:
+                ml_label = 1
+            elif unsafe_prob >= 0.25 and len(found_categories) >= 1:
+                ml_label = 1 # Boost borderline case due to rule support
+        except: pass
+
+    # --- PHASE 4: FINAL CLASSIFICATION (High-Security Priority) ---
+    is_unsafe = (ml_label == 1) or (len(found_categories) >= 2)
+    is_suspicious = (not is_unsafe) and (len(found_categories) == 1 or unsafe_prob >= 0.20)
+    
+    if is_unsafe:
+        status = "UNSAFE"
+        trust_score = max(5, 25 - (len(found_categories) * 6))
+        
+        reasons = []
+        if ml_label == 1: reasons.append("Neural layer detected manipulative intent profile.")
+        if len(found_categories) >= 2: reasons.append(f"Multiple risk markers: {', '.join(all_patterns)}.")
+        elif found_categories: reasons.append(f"Risk signal detected: {all_patterns[0]}.")
+        
+        message = " | ".join(reasons)
+    elif is_suspicious:
+        status = "SUSPICIOUS"
+        trust_score = int(60 - (unsafe_prob * 10))
+        message = f"Potential threat marker found: {', '.join(all_patterns)}."
+    else:
+        status = "SAFE"
+        trust_score = int(90 + (unsafe_prob * 10)) if unsafe_prob < 0.2 else 95
+        message = "No manipulative patterns or security threats were detected."
 
     return {
         "status": status,
+        "classification": status,
         "trust_score": trust_score,
         "message": message,
-        "findings": findings,
-        "source": "rule_engine_text",
-        "is_official": None,
-        "url_analysis": url_analysis,
-        "type": "text"
+        "patterns_found": len(all_patterns),
+        "patterns": all_patterns,
+        "neural_safety": f"{(1 - unsafe_prob)*100:.1f}%",
+        "applied_threshold": security_threshold
     }

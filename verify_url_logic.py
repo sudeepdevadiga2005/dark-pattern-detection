@@ -1,71 +1,44 @@
-import pandas as pd
-from urllib.parse import urlparse
-from duckduckgo_search import DDGS
+import sys
 import os
 
-def check_url_status(url):
-    # Step 0: Pre-process URL to get domain
-    original_url = url
-    if not url.startswith(('http://', 'https://')):
-        url = 'https://' + url
+# Add the current directory to sys.path so we can import from trust_pipeline
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from trust_pipeline.pipeline import process_url_domain
+from trust_pipeline.utils import detect_input_type
+
+def run_aegis_verification():
+    print("\n" + "="*50)
+    print("      AEGIS SECURE CONSOLE - URL VERIFIER")
+    print("="*50 + "\n")
     
-    try:
-        domain = urlparse(url).netloc.lower()
-        if domain.startswith('www.'):
-            domain = domain[4:]
-    except:
-        domain = original_url.lower()
+    target = input("Enter target URL or Domain: ").strip()
+    if not target:
+        print("Error: No target provided.")
+        return
 
-    # Step 1: Load Dataset 1 (valid_domains.csv)
-    dataset_path = 'valid_domains.csv'
-    found_in_dataset = False
-    category = None
+    input_type = detect_input_type(target)
+    if input_type not in ("url", "domain"):
+        print("Error: Invalid URL or Domain format.")
+        return
 
-    if os.path.exists(dataset_path):
-        try:
-            # We only read necessary columns for speed if possible, 
-            # but for 26MB pandas is fine.
-            df = pd.read_csv(dataset_path)
-            # Find the domain in the dataset
-            match = df[df['Domain'].str.lower() == domain]
-            if not match.empty:
-                found_in_dataset = True
-                category = match.iloc[0]['Category']
-        except Exception as e:
-            print(f"Error reading dataset: {e}")
+    print(f"\nScanning {target}...")
+    result = process_url_domain(target, input_type)
 
-    # Logic based on user requirements:
-    if found_in_dataset:
-        # 2nd step: Check if e-commerce
-        # (Assuming 'E-commerce' is the category name in the dataset)
-        if category.lower() == 'e-commerce':
-            print("Verified Website")
-        else:
-            # "else founded url it did not e commerce then print only e commerce websitandgiven is that categry link"
-            print(f"Only e-commerce website and given is that {category} link")
-    else:
-        # Step 3: "ordefault is not found in data setthen go to internet for more information"
-        print(f"Domain '{domain}' not found in dataset. Fetching internet information...")
-        try:
-            with DDGS() as ddgs:
-                # Searching for the domain to get context
-                search_query = f"{domain} official website e-commerce info"
-                results = list(ddgs.text(search_query, max_results=3))
-                
-                if results:
-                    print("\n--- Internet Information ---")
-                    for idx, r in enumerate(results, 1):
-                        print(f"{idx}. {r['title']}")
-                        print(f"   URL: {r['href']}")
-                        print(f"   Snippet: {r['body'][:150]}...")
-                else:
-                    print("No information found on the internet.")
-        except Exception as e:
-            print(f"Internet search error: {e}")
+    print(f"\n--- [ ANALYSIS RESULT: {result['status']} ] ---")
+    print(f"Trust Score: {result['trust_score']}%")
+    print(f"Risk Level:  {result['risk_level']}")
+    print(f"Analysis:    {result['message']}")
+    
+    if result['findings']:
+        print("\nIntelligence Rationale:")
+        for f in result['findings']:
+            print(f"  [!] {f}")
+    
+    print("\n" + "="*50 + "\n")
 
 if __name__ == "__main__":
-    test_url = input("Enter the URL to verify: ").strip()
-    if test_url:
-        check_url_status(test_url)
-    else:
-        print("Please provide a valid URL.")
+    try:
+        run_aegis_verification()
+    except KeyboardInterrupt:
+        print("\nScan aborted.")

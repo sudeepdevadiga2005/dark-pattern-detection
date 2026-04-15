@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { 
     Activity, Users, Shield, Zap, Search, ArrowUpRight, 
     Download, RefreshCcw, LayoutDashboard, Database, 
-    Bell, Settings, LogOut, ChevronRight, UserCheck, ShieldAlert,
-    ArrowLeft
+    Bell, Settings, LogOut, ChevronRight, UserCheck, ShieldAlert, ShieldCheck,
+    ArrowLeft, User
 } from 'lucide-react';
 import { 
     LineChart, Line, XAxis, YAxis, CartesianGrid, 
@@ -12,6 +13,11 @@ import {
 import axios from 'axios';
 import Swal from 'sweetalert2';
 import './AdminDashboard.css';
+
+const formatPercent = (val) => {
+    if (val === undefined || val === null || isNaN(val)) return "N/A";
+    return (val * 100).toFixed(2) + "%";
+};
 
 const API_BASE_URL = "/api";
 
@@ -24,23 +30,45 @@ const AdminDashboard = () => {
     const [users, setUsers] = useState([]);
     const [scans, setScans] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [activeTab, setActiveTab] = useState('overview'); // 'overview', 'users', 'scans', 'analytics', 'register'
+    const [activeTab, setActiveTab] = useState('overview'); // 'overview', 'users', 'scans', 'analytics', 'register', 'metrics'
+    const [sensitivityMode, setSensitivityMode] = useState('balanced'); // 'balanced', 'strict'
     const [regForm, setRegForm] = useState({ username: '', email: '', password: '' });
     const [adminName, setAdminName] = useState('SD');
     const [isLoggingOut, setIsLoggingOut] = useState(false);
     const [heartbeatStatus, setHeartbeatStatus] = useState('stable'); // 'stable', 'checking', 'error'
     const [searchQuery, setSearchQuery] = useState('');
     const [viewingUserLogs, setViewingUserLogs] = useState(null); // stores user object to view logs for
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [isAccountOpen, setIsAccountOpen] = useState(false);
+    const [preferences, setPreferences] = useState({
+        refreshInterval: 60,
+        exportFormat: 'csv'
+    });
 
     useEffect(() => {
         document.title = 'Dark Pattern Admin';
         fetchStats();
         fetchUsers();
         fetchScans();
+        fetchMetrics();
         
         // Establish Aegis Pulse (Heartbeat) every 60 seconds
         const pulseInterval = setInterval(checkSessionPulse, 60000);
-        return () => clearInterval(pulseInterval);
+
+        const handleClickOutside = (e) => {
+            if (!e.target.closest('.settings-panel') && !e.target.closest('.settings-toggle')) {
+                setIsSettingsOpen(false);
+            }
+            if (!e.target.closest('.account-dropdown') && !e.target.closest('.account-toggle')) {
+                setIsAccountOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+
+        return () => {
+            clearInterval(pulseInterval);
+            document.removeEventListener('mousedown', handleClickOutside);
+        };
     }, []);
 
     const [isRefreshing, setIsRefreshing] = useState(false);
@@ -72,7 +100,7 @@ const AdminDashboard = () => {
 
     const refreshDashboard = async () => {
         setIsRefreshing(true);
-        await Promise.all([fetchStats(), fetchUsers(), fetchScans()]);
+        await Promise.all([fetchStats(), fetchUsers(), fetchScans(), fetchMetrics()]);
         setTimeout(() => setIsRefreshing(false), 500); // Small delay for UX
     };
 
@@ -116,6 +144,16 @@ const AdminDashboard = () => {
             if (!err.response && retries > 0) {
                 setTimeout(() => fetchScans(retries - 1), 2000);
             }
+        }
+    };
+
+    const [metrics, setMetrics] = useState(null);
+    const fetchMetrics = async () => {
+        try {
+            const res = await axios.get(`${API_BASE_URL}/admin/model-metrics`, { withCredentials: true });
+            setMetrics(res.data);
+        } catch (err) {
+            console.error("Metrics not available yet.");
         }
     };
 
@@ -232,6 +270,38 @@ const AdminDashboard = () => {
         }
     };
 
+    const handleRevokeUser = async (user) => {
+        const confirm = await Swal.fire({
+            title: 'REVOKE ACCESS?',
+            text: `Permanently terminate access for ${user.username}? This will also purge their entire intelligence history.`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#ff4d4d',
+            cancelButtonColor: '#64FFDA',
+            confirmButtonText: 'YES, REVOKE',
+            background: '#020617',
+            color: '#fff'
+        });
+
+        if (confirm.isConfirmed) {
+            try {
+                const res = await axios.delete(`${API_BASE_URL}/admin/revoke-user/${user._id}`, { withCredentials: true });
+                if (res.data.success) {
+                    Swal.fire({
+                        title: 'ACCESS REVOKED',
+                        text: res.data.message,
+                        icon: 'success',
+                        background: '#020617',
+                        color: '#64FFDA'
+                    });
+                    fetchUsers();
+                }
+            } catch (err) {
+                Swal.fire('Error', err.response?.data?.message || 'Revocation failed', 'error');
+            }
+        }
+    };
+
     if (loading) {
         return (
             <div className="admin-loading" style={{ flexDirection: 'column', gap: '20px' }}>
@@ -248,13 +318,13 @@ const AdminDashboard = () => {
         <div className="admin-wrapper fade-in">
             {/* Sidebar */}
             <aside className="admin-sidebar">
-                <div className="admin-brand">
+                <Link to="/admin" className="admin-brand" style={{ textDecoration: 'none' }}>
                     <Shield size={28} className="brand-glow" />
                     <div className="brand-text">
                         <h3>AEGIS</h3>
                         <p>COMMAND CENTER</p>
                     </div>
-                </div>
+                </Link>
 
                 <nav className="admin-nav">
                     <div 
@@ -270,6 +340,12 @@ const AdminDashboard = () => {
                         <Users size={18} /> USER ARCHIVE
                     </div>
                     {/* Scan logs sidebar entry removed as per request - accessible via User clicks */}
+                    <div 
+                        className={`nav-item ${activeTab === 'metrics' ? 'active' : ''}`}
+                        onClick={() => setActiveTab('metrics')}
+                    >
+                        <Zap size={18} /> MODEL METRICS
+                    </div>
                     <div className="nav-spacer"></div>
                     <div className="nav-item logout" onClick={handleLogout}><LogOut size={18} /> TERMINAL EXIT</div>
                 </nav>
@@ -289,12 +365,50 @@ const AdminDashboard = () => {
                         />
                     </div>
                     <div className="header-actions">
-                        <div className="notification-bell" title={`Session Pulse: ${heartbeatStatus}`}>
-                            <Bell size={18} />
-                            <span className="bell-dot" style={{ background: heartbeatStatus === 'stable' ? '#64ffda' : (heartbeatStatus === 'checking' ? '#fbbf24' : '#ff4d4d') }}></span>
+                        <div className="header-actions-fixed">
+                            <button 
+                                className={`action-btn settings-toggle ${isSettingsOpen ? 'active' : ''}`} 
+                                title="System Preferences"
+                                onClick={() => setIsSettingsOpen(!isSettingsOpen)}
+                                aria-label="Settings"
+                            >
+                                <Settings size={18} />
+                            </button>
+                            
+                            <div className="account-trigger-wrapper" style={{ position: 'relative' }}>
+                                <button 
+                                    className={`action-btn account-toggle ${isAccountOpen ? 'active' : ''}`} 
+                                    title="Account Settings"
+                                    onClick={() => setIsAccountOpen(!isAccountOpen)}
+                                    aria-label="Account"
+                                >
+                                    <User size={18} />
+                                </button>
+                                
+                                {isAccountOpen && (
+                                    <div className="account-dropdown fade-in">
+                                        <div className="dropdown-header">
+                                            <div className="admin-profile-sm">{adminName}</div>
+                                            <div className="admin-info">
+                                                <p>{adminName === 'SD' ? 'Sudeep Devadiga' : adminName}</p>
+                                                <small>Root Administrator</small>
+                                            </div>
+                                        </div>
+                                        <div className="dropdown-divider"></div>
+                                        <div className="dropdown-item" onClick={() => { setActiveTab('overview'); setIsAccountOpen(false); }}>
+                                            <User size={14} /> Profile
+                                        </div>
+                                        <div className="dropdown-item" onClick={() => { setActiveTab('users'); setIsAccountOpen(false); }}>
+                                            <Users size={14} /> Manage Users
+                                        </div>
+                                        <div className="dropdown-divider"></div>
+                                        <div className="dropdown-item logout" onClick={handleLogout}>
+                                            <LogOut size={14} /> Logout
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                         </div>
-                        <Settings size={18} />
-                        <div className="admin-profile" title={`Admin Identity: ${adminName}`}>{adminName}</div>
                     </div>
                 </header>
 
@@ -305,6 +419,7 @@ const AdminDashboard = () => {
                                 activeTab === 'overview' ? 'System Command Center' :
                                 activeTab === 'users' ? 'User Database Management' :
                                 activeTab === 'analytics' ? 'Advanced Live Analytics' :
+                                activeTab === 'metrics' ? 'Model Performance Dashboard' :
                                 'Administrative Terminal'
                             )}
                         </h2>
@@ -318,6 +433,14 @@ const AdminDashboard = () => {
                                 <RefreshCcw size={14} className={isRefreshing ? "spin" : ""} /> {isRefreshing ? "SYNCHING..." : "REFRESH"}
                             </button>
                             <button className="btn-download" onClick={() => {
+                                if (activeTab === 'metrics') {
+                                    const jsonString = `data:text/json;chatset=utf-8,${encodeURIComponent(JSON.stringify(metrics, null, 4))}`;
+                                    const link = document.createElement("a");
+                                    link.href = jsonString;
+                                    link.download = "aegis_model_metrics.json";
+                                    link.click();
+                                    return;
+                                }
                                 const listToExport = viewingUserLogs ? scans.filter(s => s.client_id === viewingUserLogs.client_id) : scans;
                                 const headers = "Timestamp,Operative,Target URL,Safety Status,Patterns Found,Aegis Conclusion\n";
                                 const csvContent = "data:text/csv;charset=utf-8," + headers + listToExport.map(s => {
@@ -538,7 +661,14 @@ const AdminDashboard = () => {
                                                     )}
                                                 </td>
                                                 <td>
-                                                    <button className="btn-table-action"><ShieldAlert size={14} /> REVOKE</button>
+                                                    <button 
+                                                        className="btn-table-action" 
+                                                        onClick={() => handleRevokeUser(user)}
+                                                        disabled={user.is_admin}
+                                                        style={user.is_admin ? { opacity: 0.3, cursor: 'not-allowed' } : {}}
+                                                    >
+                                                        <ShieldAlert size={14} /> {user.is_admin ? 'LOCKED' : 'REVOKE'}
+                                                    </button>
                                                 </td>
                                             </tr>
                                         ))}
@@ -645,13 +775,174 @@ const AdminDashboard = () => {
                                 </table>
                             </div>
                         </div>
-                    ) : activeTab === 'analytics' ? (
-                        <div className="users-view fade-in" style={{textAlign: 'center', padding: '100px 0'}}>
-                            <Activity size={48} style={{color: '#64FFDA', margin: '0 auto 20px', opacity: 0.5}} />
-                            <h3 style={{fontSize: '24px', marginBottom: '10px'}}>Aegis Link Establishing...</h3>
-                            <p style={{color: 'rgba(255,255,255,0.4)', maxWidth: '400px', margin: '0 auto', fontSize: '14px', lineHeight: '1.6'}}>
-                                Advanced real-time live analytics node is currently calibrating. Live stream visualizers will be fully operational in the next security patch.
-                            </p>
+                    ) : activeTab === 'metrics' ? (
+                        <div className="metrics-view fade-in">
+                            {!metrics ? (
+                                <div className="metrics-empty">
+                                    <ShieldAlert size={48} />
+                                    <p>Classification telemetry not found. Run evaluation pipeline to generate reports.</p>
+                                </div>
+                            ) : (
+                                <div className="metrics-grid">
+                                    <div className="sensitivity-controls" style={{ marginBottom: '20px', display: 'flex', gap: '15px', alignItems: 'center' }}>
+                                        <button 
+                                            className={`btn-sensitivity ${sensitivityMode === 'balanced' ? 'active' : ''}`}
+                                            style={{ 
+                                                padding: '10px 20px', 
+                                                borderRadius: '10px', 
+                                                fontSize: '11px', 
+                                                fontWeight: 800, 
+                                                cursor: 'pointer',
+                                                background: sensitivityMode === 'balanced' ? '#64FFDA' : 'rgba(255,255,255,0.05)',
+                                                color: sensitivityMode === 'balanced' ? '#000' : '#fff',
+                                                border: 'none',
+                                                transition: '0.3s'
+                                            }}
+                                            onClick={() => setSensitivityMode('balanced')}
+                                        >
+                                            BALANCED MODE
+                                        </button>
+                                        <button 
+                                            className={`btn-sensitivity ${sensitivityMode === 'strict' ? 'active' : ''}`}
+                                            style={{ 
+                                                padding: '10px 20px', 
+                                                borderRadius: '10px', 
+                                                fontSize: '11px', 
+                                                fontWeight: 800, 
+                                                cursor: 'pointer',
+                                                background: sensitivityMode === 'strict' ? '#ff4d4d' : 'rgba(255,255,255,0.05)',
+                                                color: sensitivityMode === 'strict' ? '#fff' : '#fff',
+                                                border: sensitivityMode === 'strict' ? '1px solid #ff4d4d' : 'none',
+                                                transition: '0.3s'
+                                            }}
+                                            onClick={() => setSensitivityMode('strict')}
+                                        >
+                                            STRICT SECURITY
+                                        </button>
+                                        <span style={{ fontSize: '10px', opacity: 0.5, letterSpacing: '0.05em' }}>(THRESHOLD PREVIEW)</span>
+                                    </div>
+
+                                    <div className="security-alert-stripe" style={{ 
+                                        padding: '15px 30px', 
+                                        borderRadius: '15px', 
+                                        marginBottom: '30px', 
+                                        background: metrics.risk_level === 'Critical' ? 'rgba(255, 77, 77, 0.1)' : metrics.risk_level === 'Warning' ? 'rgba(251, 191, 36, 0.1)' : 'rgba(100, 255, 218, 0.1)',
+                                        border: `1px solid ${metrics.risk_level === 'Critical' ? '#ff4d4d' : metrics.risk_level === 'Warning' ? '#fbbf24' : '#64FFDA'}`,
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center'
+                                    }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+                                            <ShieldCheck size={32} color={metrics.risk_level === 'Safe' ? '#64FFDA' : metrics.risk_level === 'Warning' ? '#fbbf24' : '#ff4d4d'} />
+                                            <div>
+                                                <h4 style={{ margin: 0, fontSize: '14px', letterSpacing: '0.1em' }}>Classifier Risk Status: <span style={{ color: metrics.risk_level === 'Safe' ? '#64FFDA' : metrics.risk_level === 'Warning' ? '#fbbf24' : '#ff4d4d' }}>{metrics.risk_level.toUpperCase()}</span></h4>
+                                                <p style={{ margin: 0, fontSize: '11px', opacity: 0.6 }}>{sensitivityMode === 'strict' ? 'Strict Security Logic (Aggressive Classification Enabled)' : metrics.threshold_config || 'Adaptive Thresholding Active'}</p>
+                                            </div>
+                                        </div>
+                                        <div style={{ textAlign: 'right' }}>
+                                            <div style={{ fontSize: '10px', opacity: 0.4 }}>MISSED THREAT RISK</div>
+                                            <div style={{ color: metrics.false_negative_rate > 0.05 ? '#ff4d4d' : '#64FFDA', fontWeight: 'bold', fontSize: '18px' }}>
+                                                {formatPercent(metrics.false_negative_rate)}
+                                            </div>
+                                            <div style={{ width: '100px', height: '4px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px', marginTop: '5px' }}>
+                                                <div style={{ 
+                                                    width: `${Math.min(100, (metrics.false_negative_rate || 0) * 1000)}%`, 
+                                                    height: '100%', 
+                                                    background: metrics.false_negative_rate > 0.05 ? '#ff4d4d' : '#64FFDA',
+                                                    boxShadow: `0 0 10px ${metrics.false_negative_rate > 0.05 ? '#ff4d4d88' : '#64FFDA88'}`
+                                                }}></div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="metrics-summary-cards" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px' }}>
+                                        <div className="metric-mini-card">
+                                            <label>ACCURACY</label>
+                                            <div className="val">{formatPercent(metrics.accuracy)}</div>
+                                        </div>
+                                        <div className="metric-mini-card">
+                                            <label>F1-SCORE</label>
+                                            <div className="val">{formatPercent(metrics.f1_score)}</div>
+                                        </div>
+                                        <div className="metric-mini-card">
+                                            <label>PRECISION</label>
+                                            <div className="val">{formatPercent(metrics.precision)}</div>
+                                        </div>
+                                        <div className="metric-mini-card">
+                                            <label>RECALL</label>
+                                            <div className="val">{formatPercent(metrics.recall)}</div>
+                                        </div>
+                                        <div className="metric-mini-card">
+                                            <label>FALSE POSITIVE RATE</label>
+                                            <div className="val" style={{ color: '#fbbf24' }}>{formatPercent(metrics.false_positive_rate)}</div>
+                                        </div>
+                                        <div className="metric-mini-card">
+                                            <label>FALSE NEGATIVE RATE</label>
+                                            <div className="val">{formatPercent(metrics.false_negative_rate)}</div>
+                                        </div>
+                                    </div>
+
+                                    <div className="matrix-card" style={{ marginTop: '40px', background: 'rgba(255,255,255,0.02)', padding: '30px', borderRadius: '20px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                                        <h4 style={{ marginBottom: '25px', opacity: 0.8, fontSize: '14px', letterSpacing: '0.1em' }}>Confusion Matrix (Test Dataset)</h4>
+                                        <div className="confusion-matrix" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px', marginBottom: '30px' }}>
+                                            <div className="cm-metric-box" style={{ background: 'rgba(255,255,255,0.03)', padding: '20px', borderRadius: '15px', textAlign: 'center', border: '1px solid rgba(100,255,218,0.1)' }}>
+                                                <div style={{ fontSize: '10px', opacity: 0.4, marginBottom: '5px' }}>TRUE NEGATIVE (SAFE)</div>
+                                                <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#64FFDA' }}>{metrics.confusion_matrix?.tn || 0}</div>
+                                            </div>
+                                            <div className="cm-metric-box" style={{ background: 'rgba(255,255,255,0.03)', padding: '20px', borderRadius: '15px', textAlign: 'center', border: '1px solid rgba(251,191,36,0.1)' }}>
+                                                <div style={{ fontSize: '10px', opacity: 0.4, marginBottom: '5px' }}>FALSE POSITIVE (NOISE)</div>
+                                                <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#fbbf24' }}>{metrics.confusion_matrix?.fp || 0}</div>
+                                            </div>
+                                            <div style={{ display: 'none' }}>Empty Spacing</div>
+                                            <div className="cm-metric-box" style={{ background: 'rgba(255,255,255,0.03)', padding: '20px', borderRadius: '15px', textAlign: 'center', border: '1px solid rgba(255,77,77,0.1)' }}>
+                                                <div style={{ fontSize: '10px', opacity: 0.4, marginBottom: '5px' }}>FALSE NEGATIVE (MISS)</div>
+                                                <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#ff4d4d' }}>{metrics.confusion_matrix?.fn || 0}</div>
+                                            </div>
+                                            <div className="cm-metric-box" style={{ background: 'rgba(255,255,255,0.03)', padding: '20px', borderRadius: '15px', textAlign: 'center', border: '1px solid rgba(100,255,218,0.1)' }}>
+                                                <div style={{ fontSize: '10px', opacity: 0.4, marginBottom: '5px' }}>TRUE POSITIVE (THREAT)</div>
+                                                <div style={{ fontSize: '24px', fontWeight: 'bold', color: '#64FFDA' }}>{metrics.confusion_matrix?.tp || 0}</div>
+                                            </div>
+                                        </div>
+
+                                        <div className="engine-status" style={{ marginTop: '30px', padding: '15px', borderRadius: '10px', background: 'rgba(100, 255, 218, 0.05)', border: '1px solid rgba(100, 255, 218, 0.1)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                            <Shield size={16} color="#64FFDA" />
+                                            <span style={{ fontSize: '11px', color: 'rgba(255,255,255,0.7)', letterSpacing: '0.05em' }}>
+                                                {metrics.status_message || "Classifier is operating within security parameters."}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    <div className="metadata-section" style={{ marginTop: '40px' }}>
+                                        <h4 style={{ marginBottom: '20px', opacity: 0.8, fontSize: '14px', letterSpacing: '0.1em' }}>Model Metadata</h4>
+                                        <div className="meta-table" style={{ width: '100%', fontSize: '12px', opacity: 0.7 }}>
+                                            <div style={{ display: 'flex', padding: '12px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                                                <span style={{ width: '200px' }}>Training Samples:</span>
+                                                <span style={{ color: '#fff' }}>{metrics.metadata?.training_samples || metrics.total_samples || 'N/A'}</span>
+                                            </div>
+                                            <div style={{ display: 'flex', padding: '12px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                                                <span style={{ width: '200px' }}>Test Segment:</span>
+                                                <span style={{ color: '#fff' }}>{metrics.metadata?.test_split || '20%'} ({metrics.metadata?.test_samples || 'N/A'} samples)</span>
+                                            </div>
+                                            <div style={{ display: 'flex', padding: '12px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                                                <span style={{ width: '200px' }}>Last Evaluated:</span>
+                                                <span style={{ color: '#64FFDA' }}>{metrics.last_evaluated || 'PENDING'}</span>
+                                            </div>
+                                            <div style={{ display: 'flex', padding: '12px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                                                <span style={{ width: '200px' }}>Positive Label:</span>
+                                                <span style={{ color: '#a855f7', fontWeight: 'bold' }}>{metrics.positive_class || 'UNSAFE'}</span>
+                                            </div>
+                                            <div style={{ display: 'flex', padding: '12px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                                                <span style={{ width: '200px' }}>Algorithm:</span>
+                                                <span style={{ color: '#00d2ff' }}>{metrics.algorithm || 'Logistic Regression'}</span>
+                                            </div>
+                                            <div style={{ display: 'flex', padding: '12px 0' }}>
+                                                <span style={{ width: '200px' }}>Vectorizer:</span>
+                                                <span style={{ color: '#00d2ff' }}>{metrics.vectorizer || 'TF-IDF Vectorizer'}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     ) : activeTab === 'register' ? (
                         <div className="admin-register-view fade-in">
@@ -734,6 +1025,63 @@ const AdminDashboard = () => {
                     )}
                 </div>
             </main>
+
+            {/* Settings Side Panel */}
+            <div className={`settings-panel ${isSettingsOpen ? 'open' : ''}`}>
+                <div className="panel-header">
+                    <div className="panel-title">
+                        <Settings size={16} className="title-icon" />
+                        <h3>SYSTEM PREFERENCES</h3>
+                    </div>
+                    <button className="close-panel" onClick={() => setIsSettingsOpen(false)} aria-label="Close Settings">×</button>
+                </div>
+                <div className="panel-content">
+                    <div className="settings-group">
+                        <label>INTERFACE THEME</label>
+                        <div className="theme-toggle">
+                            <button className="active">DARK (AEGIS CORE)</button>
+                            <button disabled title="Light theme available in future security patch">LIGHT (LOCKED)</button>
+                        </div>
+                    </div>
+                    <div className="settings-group">
+                        <label>REFRESH INTERVAL (SECONDS)</label>
+                        <select 
+                            value={preferences.refreshInterval} 
+                            onChange={(e) => setPreferences({...preferences, refreshInterval: e.target.value})}
+                        >
+                            <option value="30">30 SECONDS</option>
+                            <option value="60">60 SECONDS</option>
+                            <option value="300">5 MINUTES</option>
+                        </select>
+                    </div>
+                    <div className="settings-group">
+                        <label>DEFAULT EXPORT FORMAT</label>
+                        <div className="export-options">
+                            <button 
+                                className={preferences.exportFormat === 'csv' ? 'active' : ''} 
+                                onClick={() => setPreferences({...preferences, exportFormat: 'csv'})}
+                            >CSV</button>
+                            <button disabled>JSON</button>
+                            <button disabled>PDF</button>
+                        </div>
+                    </div>
+                    <div className="settings-group">
+                        <label>SYSTEM TELEMETRY</label>
+                        <div className="telemetry-item">
+                            <div className="pulse-indicator">
+                                <div className={`pulse-dot ${heartbeatStatus}`}></div>
+                                <span>Aegis Link Status: <strong style={{ color: heartbeatStatus === 'stable' ? '#64FFDA' : '#ff4d4d' }}>{heartbeatStatus.toUpperCase()}</strong></span>
+                            </div>
+                        </div>
+                        <div className="telemetry-item">
+                            <small>Backend Node: 127.0.0.1:5000</small>
+                        </div>
+                    </div>
+                </div>
+                <div className="panel-footer">
+                    <button className="btn-save-prefs" onClick={() => setIsSettingsOpen(false)}>APPLY PREFERENCES</button>
+                </div>
+            </div>
         </div>
     );
 };

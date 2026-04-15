@@ -1,404 +1,379 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import API_BASE_URL from '../config';
-import Cookies from 'js-cookie';
+import { ShieldCheck, ShieldAlert, Info, Search, RefreshCw, ArrowLeft, Activity, Target, Zap } from 'lucide-react';
 import './Analyze.css';
 
 const Analyze = () => {
+    const location = useLocation();
+    const navigate = useNavigate();
     const [input, setInput] = useState('');
     const [inputType, setInputType] = useState('url');
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [result, setResult] = useState(null);
     const [controller, setController] = useState(null);
 
+    useEffect(() => {
+        const params = new URLSearchParams(location.search);
+        const mode = params.get('mode');
+        if (mode === 'text') setInputType('text');
+        else if (mode === 'url') setInputType('url');
+    }, [location]);
+
     const handleAnalyze = async () => {
         if (!input || !input.trim()) return;
+        
+        const cleanInput = input.trim();
+        const lowerInput = cleanInput.toLowerCase();
+        const isUrlPattern = /^https?:\/\//.test(lowerInput) || /^www\./.test(lowerInput) || /^[a-z0-9-]+\.[a-z]{2,}$/.test(lowerInput);
+
+        // STRICT VALIDATION
+        if (inputType === 'url' && !isUrlPattern) {
+            setResult({ error: "Please enter a valid URL or Domain in this field. For text analysis, use the 'Text Audit' tab." });
+            return;
+        }
+        
+        if (inputType === 'text' && isUrlPattern) {
+            setResult({ error: "This tab is for Text Analysis only. Please enter a URL in the 'URL Analysis' tab." });
+            return;
+        }
+
         setIsAnalyzing(true);
         setResult(null);
-
-        const cleanInput = input.trim();
-
-        // 🛡️ High-Fidelity Validation 
-        const isUrlPattern = (inputText) => {
-            // If it has newlines or many spaces, it's a block of text, not a single URL
-            if (inputText.includes('\n') || inputText.trim().split(/\s+/).length > 1) return false;
-
-            const host = inputText.replace('http://', '').replace('https://', '').split('/')[0];
-            const urlRegex = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(?:\.[a-z]{2,})?$/i;
-            return urlRegex.test(host);
-        };
-
-        const isPureUrl = isUrlPattern(cleanInput);
-
-        if (inputType === 'url') {
-            const typoUrlRegex = /^[a-z0-9.-]+\,[a-z]{2,4}$/i;
-            const host = cleanInput.replace('http://', '').replace('https://', '').split('/')[0];
-            const isMalformedUrl = typoUrlRegex.test(host) && !isPureUrl;
-
-            if (isMalformedUrl) {
-                setResult({
-                    success: false,
-                    error: "INVALID URL FORMAT DETECTED: You appear to have used a comma (,) instead of a dot (.) in your domain. Please correct the URL (e.g. amazon.com) and try again."
-                });
-                setIsAnalyzing(false);
-                return;
-            }
-
-            if (!isPureUrl && cleanInput.includes(' ')) {
-                setResult({
-                    success: false,
-                    error: "INVALID TARGET: You entered a block of text. Please switch to TEXT AUDIT mode to analyze paragraphs or sentences."
-                });
-                setIsAnalyzing(false);
-                return;
-            }
-
-            if (!isPureUrl) {
-                setResult({
-                    success: false,
-                    error: "INVALID URL: The provided string does not look like a valid domain or URL."
-                });
-                setIsAnalyzing(false);
-                return;
-            }
-        }
-
-        if (inputType === 'text') {
-            if (isPureUrl) {
-                setResult({
-                    success: false,
-                    error: "INVALID TARGET: You entered a single URL. Please switch to URL SCAN mode for specialized domain logic."
-                });
-                setIsAnalyzing(false);
-                return;
-            }
-        }
 
         const abortController = new AbortController();
         setController(abortController);
 
         try {
             const endpoint = inputType === 'url' ? '/analyze' : '/analyze-text';
-            const payload = inputType === 'url' ? { url: cleanInput } : { text: cleanInput };
+            const payload = inputType === 'url' ? { url: cleanInput } : { text: input.trim() }; // Keep case for text
 
             const res = await axios.post(`${API_BASE_URL}${endpoint}`, payload, {
                 signal: abortController.signal
             });
 
-            // Simulate aegis delay for "wow" effect
+            // "Cinematic" delay for AI feeling
             setTimeout(() => {
+                // If backend gives an error inside a 200 OK, wrap it. Otherwise set raw result.
                 setResult(res.data);
                 setIsAnalyzing(false);
                 setController(null);
-            }, 1200);
+            }, 1800);
         } catch (err) {
-            if (axios.isCancel(err)) {
-                console.log("Analysis aborted by user.");
-                return;
-            }
-            console.error(err);
+            if (axios.isCancel(err)) return;
             setIsAnalyzing(false);
-            setResult({ success: false, error: "Aegis Network Link Failure. Check if the backend server is online." });
+            setResult({ error: err.response?.data?.error || "Connection interrupted. Please check your secure link." });
             setController(null);
         }
     };
 
-    const handleStopAnalyze = () => {
-        if (controller) {
-            controller.abort();
-            setIsAnalyzing(false);
-            setController(null);
-            setResult({ success: false, error: "AEGIS SCAN ABORTED BY OPERATIVE. Connection terminated." });
+    const trySample = () => {
+        const samples = {
+            url: "https://amazon-security-alert.net/login",
+            text: "Final Warning! Your account will be permanently deactivated in 5 minutes unless you verify your identity now. Click here to prevent immediate loss of data!"
+        };
+        setInput(samples[inputType]);
+    };
+
+    const getStatusInfo = (status, score) => {
+        const s = status ? status.toUpperCase() : '';
+        if (s === 'SAFE') return { label: 'Safe', color: '#00ff9d', desc: 'This content appears safe and trustworthy.', recommend: 'You can proceed normally.' };
+        if (s === 'MEDIUM_RISK') return { label: 'Suspicious', color: '#ffcc00', desc: 'Some elements may be misleading or manipulative.', recommend: 'Proceed with caution.' };
+        if (s === 'HIGH_RISK') return { label: 'High Risk', color: '#ff4d4d', desc: 'This content contains strong deceptive patterns.', recommend: 'Avoid interacting with this content.' };
+        
+        // Final fallback for URL analysis or unexpected labels
+        if (s === 'SUSPICIOUS') return { label: 'Suspicious', color: '#ffcc00', desc: 'Potentially manipulative content detected.', recommend: 'Verify before proceeding.' };
+        if (s === 'UNSAFE') return { label: 'High Risk', color: '#ff4d4d', desc: 'This content exhibits signatures of active fraud.', recommend: 'Avoid interacting.' };
+        
+        return { label: 'Threat Detected', color: '#ff4d4d', desc: 'Malicious markers identified in input.', recommend: 'Do not follow these instructions.' };
+    };
+
+    const getCleanExplanation = (result) => {
+        if (result.message) return result.message;
+        if (result.status === 'SAFE') return "No suspicious patterns were detected in the content.";
+        return "The content includes messaging that may influence user choices unfairly.";
+    };
+
+    const analyzeFindings = (findings = []) => {
+        const threats = [];
+        const signals = [];
+
+        findings.forEach(f => {
+            if (typeof f === 'string') {
+                const isSignal = 
+                    f.toLowerCase().includes('matched valid') || 
+                    f.toLowerCase().includes('network check') || 
+                    f.toLowerCase().includes('no definitive') ||
+                    f.toLowerCase().includes('shows signs');
+                
+                if (isSignal) {
+                    signals.push(f);
+                } else {
+                    threats.push(f);
+                }
+            } else {
+                threats.push(f);
+            }
+        });
+
+        return { threats, signals };
+    };
+
+    const getDarkPatternDesc = (cat) => {
+        switch(cat) {
+            case 'Fake Urgency': return "This creates artificial time pressure to force an immediate decision.";
+            case 'Hidden Costs': return "Undisclosed fees or requirements may be hidden in the fine print.";
+            case 'Misdirection': return "This technique influences choice by highlighting specific information while hiding others.";
+            case 'Social Proof': return "Uses potentially fabricated community activity to pressure purchases.";
+            case 'Forced Action': return "Forces the user to take an unnecessary action to proceed.";
+            case 'Obstruction': return "Makes it artificially difficult to cancel or back out of an action.";
+            default: return "Manipulative pattern designed to influence user behavior.";
         }
     };
+
+    const parsedFindings = result && !result.error ? analyzeFindings(result.findings) : { threats: [], signals: [] };
 
     return (
-        <div className={`analyze-portal-wrapper ${isAnalyzing ? 'is-scanning' : ''} ${result && (result.classification === 'Scam' || result.classification === 'Fake') ? 'danger-alert' : result && result.classification === 'Suspicious' ? 'warning-alert' : ''}`}>
-            {/* The Cinematic Background Layer */}
-            <div className="analyze-bg-overlay">
-                <div className="aegis-scan-lines"></div>
-                <div className="dynamic-glow-sphere"></div>
+        <div className={`analyze-portal-wrapper ${isAnalyzing ? 'is-scanning' : ''}`}>
+            {/* Advanced Background Nexus */}
+            <div className="background-nexus">
+                <div className="nexus-base-gradient"></div>
+                <div className="nexus-grid"></div>
+                <div className="nexus-noise"></div>
+                <div className="nexus-blobs">
+                    <div className="blob blob-cyan"></div>
+                    <div className="blob blob-purple"></div>
+                    <div className="blob blob-teal"></div>
+                </div>
             </div>
 
-            <nav className="analyze-mini-nav fade-in">
-                <div className="brand">
-                    <div className="brand-mark">A</div>
-                    <span className="brand-title">AEGIS <em>AUDITOR</em></span>
+            <nav className="analyze-nav fade-in">
+                <div className="nav-left">
+                    <Link to="/dashboard" className="nav-logo">
+                        <div className="logo-box">A</div>
+                        <div className="logo-text">
+                            <span className="logo-main">AEGIS</span>
+                            <span className="logo-sub">SECURE CONSOLE</span>
+                        </div>
+                    </Link>
                 </div>
-                <Link to="/" className="btn-back-home">← TERMINAL EXIT</Link>
+                <div className="nav-right">
+                    <button className="nav-action-btn" onClick={() => navigate('/dashboard')}>
+                        <LayoutGrid size={16} /> DASHBOARD
+                    </button>
+                </div>
             </nav>
 
-            <main className="analyze-content fade-in">
-                <header className="terminal-header">
-                    <span className="live-badge">SYSTEM: ONLINE</span>
-                    <h1>Dark Pattern <em>Analyzer</em></h1>
-                    <p>Input target URL or content fragments for real-time ML security verification.</p>
-                </header>
+            <main className="analyze-main">
+                {!result && !isAnalyzing && (
+                    <div className="analyze-hero fade-in">
+                        <div className="hero-badge">
+                            <Zap size={14} className="flash-icon" /> AI SECURITY ENGINE
+                        </div>
+                        <h1>Dark Pattern Detection Console</h1>
+                        <p>Advanced neural analysis for deceptive design and manipulative content</p>
+                    </div>
+                )}
 
-                <div className="glass-terminal stagger-1">
-                    <div className="terminal-controls">
-
-                        <div className="input-type-toggle">
-                            <div className="analyze-toggle-bg">
-                                <div className={`analyze-toggle-slider ${inputType === 'text' ? 'slide-right' : ''}`}></div>
-                            </div>
-                            <button
-                                className={`analyze-toggle-btn ${inputType === 'url' ? 'active' : ''}`}
-                                onClick={() => { setInputType('url'); setInput(''); setResult(null); }}
+                {!result && (
+                    <div className="glass-card analyzer-card stagger-1">
+                        <div className="card-tabs">
+                            <button 
+                                className={`tab-btn ${inputType === 'url' ? 'active' : ''}`}
+                                onClick={() => setInputType('url')}
                                 disabled={isAnalyzing}
                             >
-                                URL SCAN
+                                <Target size={18} /> URL Analysis
                             </button>
-                            <button
-                                className={`analyze-toggle-btn ${inputType === 'text' ? 'active' : ''}`}
-                                onClick={() => { setInputType('text'); setInput(''); setResult(null); }}
+                            <button 
+                                className={`tab-btn ${inputType === 'text' ? 'active' : ''}`}
+                                onClick={() => setInputType('text')}
                                 disabled={isAnalyzing}
                             >
-                                TEXT AUDIT
+                                <Activity size={18} /> Text Audit
                             </button>
                         </div>
 
-                        <div className="input-group-main">
-                            <textarea
-                                placeholder={inputType === 'url' ? "Paste target URL here for full aegis audit..." : "Paste deep-content or emails here for textual aegis audit..."}
+                        <div className="analyzer-input-box">
+                            <textarea 
+                                placeholder={inputType === 'url' ? "Enter website URL to scan..." : "Paste suspicious content or promotional text here..."}
                                 value={input}
                                 onChange={(e) => setInput(e.target.value)}
-                                onKeyDown={(e) => {
-                                    if (e.key === 'Enter' && e.ctrlKey) handleAnalyze();
-                                }}
                                 disabled={isAnalyzing}
-                                className="elastic-textarea"
-                                rows={input.split('\n').length > 5 ? 10 : 3}
+                                className="styled-textarea"
                             />
-                            <div className="terminal-actions">
-                                <button
-                                    className={`btn-primary-scan ${isAnalyzing ? 'scanning-pulse' : ''}`}
-                                    onClick={handleAnalyze}
-                                    disabled={isAnalyzing || !input}
+                            
+                            <div className="card-actions">
+                                <div className="action-left">
+                                    <button className="btn-secondary" onClick={() => setInput('')} disabled={isAnalyzing}>Clear</button>
+                                    <button className="btn-secondary" onClick={trySample} disabled={isAnalyzing}>Try Sample</button>
+                                </div>
+                                <button 
+                                    className={`btn-primary ${isAnalyzing ? 'loading' : ''}`} 
+                                    onClick={handleAnalyze} 
+                                    disabled={isAnalyzing || !input.trim()}
                                 >
-                                    {isAnalyzing ? (
-                                        <>
-                                            <span className="spinner-aegis"></span>
-                                            AEGIS AGENT ACTIVE...
-                                        </>
-                                    ) : 'LAUNCH DEEP ANALYSIS'}
+                                    {isAnalyzing ? <RefreshCw className="spin-icon" /> : <Search size={20} />}
+                                    {isAnalyzing ? "Analyzing Patterns..." : "Launch Deep Analysis"}
                                 </button>
-
-                                {isAnalyzing && (
-                                    <button
-                                        className="btn-abort-scan fade-in"
-                                        onClick={handleStopAnalyze}
-                                    >
-                                        STOP AEGIS AGENT
-                                    </button>
-                                )}
-                                <div className="btn-hint">Press <strong>CTRL + ENTER</strong> to scan</div>
                             </div>
                         </div>
                     </div>
+                )}
 
-                    {isAnalyzing && (
-                        <div className="scanning-visualization fade-in">
-                            <div className="pulse-ring"></div>
-                            <div className="pulse-ring delay-1"></div>
-                            <p>METRICS-PROCESSING: 15 CATEGORIES ACTIVE...</p>
+                {isAnalyzing && (
+                    <div className="scanning-ui fade-in">
+                        <div className="neural-rings">
+                            <div className="ring"></div>
+                            <div className="ring delay-1"></div>
+                            <div className="ring delay-2"></div>
                         </div>
-                    )}
+                        <h3>Security Pipeline Active</h3>
+                        <p>Scanning for neural manipulation markers...</p>
+                    </div>
+                )}
 
-                    {result && !isAnalyzing && (
-                        <div className="result-container-premium fade-in">
-                            {result.success === false ? (
-                                <div className="result-summary danger-badge">
-                                    <div className="indicator-icon">❌</div>
-                                    <div className="indicator-text">
-                                        <h2>INVALID TARGET DETECTED</h2>
-                                        <p>{result.error || "The system could not recognize this input as a valid URL or pattern."}</p>
+                {result && !isAnalyzing && result.error && (
+                    <div className="glass-card error-card fade-in">
+                        <ShieldAlert size={48} className="error-icon" />
+                        <h3>Secure Analysis Blocked</h3>
+                        <p>{result.error}</p>
+                        <button className="btn-primary" onClick={() => setResult(null)}>Try Again</button>
+                    </div>
+                )}
+
+                {result && !isAnalyzing && !result.error && (
+                    <div className="result-view fade-in">
+                        <div className="result-grid">
+                            <div className="glass-card result-summary-card">
+                                <div className="summary-header">
+                                    <div className="status-indicator">
+                                        <div className="status-label">SECURITY STATUS</div>
+                                        <h2 style={{ color: getStatusInfo(result.status).color }}>
+                                            {getStatusInfo(result.status).label}
+                                        </h2>
+                                    </div>
+                                    <div className="trust-gauge">
+                                        <svg viewBox="0 0 100 100" className="gauge-svg">
+                                            <circle className="gauge-bg" cx="50" cy="50" r="45" />
+                                            <circle 
+                                                className="gauge-fill" 
+                                                cx="50" cy="50" r="45" 
+                                                style={{ 
+                                                    strokeDasharray: `${result.trust_score * 2.82} 282`,
+                                                    stroke: getStatusInfo(result.status).color
+                                                }} 
+                                            />
+                                        </svg>
+                                        <div className="gauge-text">
+                                            <span className="gauge-val">{result.trust_score}%</span>
+                                            <label>TRUST</label>
+                                        </div>
                                     </div>
                                 </div>
-                            ) : (
-                                <>
-                                    <div className={`result-summary ${(result.status === 'SUSPICIOUS' || result.status === 'FAKE')
-                                        ? 'danger-badge'
-                                        : (result.status === 'POTENTIALLY_SUSPICIOUS')
-                                            ? 'warning-badge'
-                                            : (result.status === 'UNKNOWN' || result.status === 'INVALID_INPUT' || result.status === 'NOT_ENOUGH_DATA')
-                                                ? 'neutral-badge'
-                                                : 'safe-badge'
-                                        }`}>
-                                        <div className="indicator-icon">
-                                            {(result.status === 'SUSPICIOUS' || result.status === 'FAKE') ? '🚨' :
-                                                (result.status === 'POTENTIALLY_SUSPICIOUS') ? '⚠️' :
-                                                    (result.status === 'UNKNOWN' || result.status === 'INVALID_INPUT' || result.status === 'NOT_ENOUGH_DATA') ? 'ℹ️' : '✅'}
-                                        </div>
-                                        <div className="indicator-text">
-                                            <h2>
-                                                {result.status === 'FAKE'
-                                                    ? 'FAKE SITE DETECTED'
-                                                    : result.status === 'SUSPICIOUS'
-                                                        ? 'THREAT DETECTED'
-                                                        : result.status === 'POTENTIALLY_SUSPICIOUS'
-                                                            ? 'SUSPICIOUS ACTIVITY'
-                                                            : result.status === 'INVALID_INPUT'
-                                                                ? 'NOT APPLICABLE'
-                                                                : result.status === 'UNKNOWN'
-                                                                    ? 'SYSTEM UNKNOWN'
-                                                                    : (result.status === 'SAFE' || result.status === 'LIKELY_SAFE' || result.status === 'LOW_RISK_TEXT')
-                                                                        ? (result.input_type === 'text' ? 'LOW RISK TEXT' : 'VERIFIED OFFICIAL')
-                                                                        : 'URL NOT FOUND'}
-                                            </h2>
-                                            <p>{result.message || "This item is not in our official verification archive. Please proceed with caution if it asks for personal metadata."}</p>
-                                        </div>
-                                        {/* Score ring mapping using actual trust_score */}
-                                        <div className="score-ring" style={{ borderColor: result.trust_score < 40 ? '#e53e3e' : result.trust_score < 70 ? '#ecc94b' : '#38a169' }}>
-                                            <span className="score-val" style={{ color: result.trust_score < 40 ? '#e53e3e' : result.trust_score < 70 ? '#ecc94b' : '#38a169' }}>
-                                                {result.trust_score || 0}%
-                                            </span>
-                                            <span className="score-label">TRUST</span>
-                                        </div>
-                                        {/* Authenticity Stage Output */}
-                                        {result.source && (
-                                            <div className="category-badge-main">
-                                                <span className="category-val">{result.source.replace(/_/g, ' ').toUpperCase()}</span>
-                                                <span className="category-label">INTELLIGENCE SOURCE</span>
-                                            </div>
-                                        )}
-                                        {/* Optional Category */}
-                                        {result.category && (
-                                            <div className="category-badge-main" style={{ minWidth: '150px' }}>
-                                                <span className="category-val">{result.category.toUpperCase()}</span>
-                                                <span className="category-label">CATEGORY</span>
-                                            </div>
-                                        )}
-                                    </div>
+                                <p className="status-message">{getStatusInfo(result.status).desc}</p>
+                            </div>
 
-                                    {/* Intelligence Rationale */}
-                                    {result.reasons && result.reasons.length > 0 && (
-                                        <div className="intelligence-rationale fade-in">
-                                            <div className="rationale-header">
-                                                <span className="rationale-tag">INTELLIGENCE RATIONALE</span>
-                                                <h3>Aegis Decision Summary</h3>
-                                            </div>
+                            <div className="glass-card explanation-card">
+                                <h3>Analysis Insight</h3>
+                                <p className="insight-text">{getCleanExplanation(result)}</p>
+                                
+                                <div className="recommendation-pill" style={{ background: `${getStatusInfo(result.status).color}15`, color: getStatusInfo(result.status).color }}>
+                                    {getStatusInfo(result.status).recommend}
+                                </div>
+                            </div>
+                        </div>
 
-                                            {result.conclusion_from_internet && (
-                                                <div className="conclusion-internet-box" style={{ background: 'rgba(255, 255, 255, 0.05)', padding: '15px', borderRadius: '12px', marginBottom: '25px', borderLeft: '4px solid #64FFDA' }}>
-                                                    <span style={{ fontSize: '10px', color: '#64FFDA', fontWeight: '800', display: 'block', marginBottom: '8px', letterSpacing: '0.1em' }}>AEGIS INTERNET CONCLUSION:</span>
-                                                    <p style={{ fontSize: '14px', lineHeight: '1.5', opacity: 0.9, color: '#fff' }}>{result.conclusion_from_internet}</p>
+                        {parsedFindings.threats.length === 0 ? (
+                            <div className="patterns-section">
+                                <div 
+                                    className="glass-card pattern-element-card" 
+                                    style={{ 
+                                        textAlign: 'center', 
+                                        padding: '30px', 
+                                        borderColor: result.status === 'SAFE' ? 'rgba(34, 197, 94, 0.2)' : 'rgba(255, 204, 0, 0.2)' 
+                                    }}
+                                >
+                                    {result.status === 'SAFE' ? (
+                                        <ShieldCheck size={36} style={{ color: '#00ff9d', margin: '0 auto 12px' }} />
+                                    ) : (
+                                        <Info size={36} style={{ color: '#ffcc00', margin: '0 auto 12px' }} />
+                                    )}
+                                    <h4 style={{ 
+                                        color: result.status === 'SAFE' ? '#00ff9d' : '#ffcc00', 
+                                        fontSize: '18px', 
+                                        marginBottom: '8px' 
+                                    }}>
+                                        {result.status === 'SAFE' ? 'No Dark Patterns Detected' : 'No Explicit Threats Found'}
+                                    </h4>
+                                    <p className="pattern-desc" style={{ maxWidth: '500px', margin: '0 auto' }}>
+                                        {result.status === 'SAFE' 
+                                            ? "The analysis engine found no malicious markers or manipulative tactics in the content." 
+                                            : "The engine found no direct malicious patterns, but the trust score remains low due to unverified network or official signals."}
+                                    </p>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="patterns-section">
+                                <h3 className="section-title">Detected Patterns</h3>
+                                <div className="patterns-grid">
+                                    {parsedFindings.threats.map((f, i) => (
+                                        <div key={i} className="glass-card pattern-element-card">
+                                            <div className="pattern-header">
+                                                <ShieldAlert size={18} className="text-danger" />
+                                                <h4>{typeof f === 'string' ? "URL Security Risk" : f.category}</h4>
+                                            </div>
+                                            <p className="pattern-desc">
+                                                {typeof f === 'string' ? f : getDarkPatternDesc(f.category)}
+                                            </p>
+                                            {f.evidence && (
+                                                <div className="evidence-box">
+                                                    <label>EVIDENCE</label>
+                                                    <code>"{f.evidence}"</code>
                                                 </div>
                                             )}
-                                            <ul className="rationale-list">
-                                                {result.reasons.map((r, idx) => (
-                                                    <li key={idx}>
-                                                        <span className="rationale-bullet"></span>
-                                                        {r}
-                                                    </li>
-                                                ))}
-                                            </ul>
                                         </div>
-                                    )}
+                                    ))}
+                                </div>
+                            </div>
+                        )}
 
-                                    {/* Forensic Comparison for Fakes (URL Mode) */}
-                                    {result.type === 'url' && result.official_url && result.official_url !== result.target_url && (
-                                        <div className="forensic-analysis fade-in">
-                                            <div className="forensic-header">
-                                                <span className="forensic-tag">FORENSIC COMPARISON</span>
-                                                <h3>Visual Pattern Mismatch</h3>
+                        {parsedFindings.signals.length > 0 && (
+                            <div className="patterns-section" style={{ marginTop: '30px' }}>
+                                <h3 className="section-title">Verification Evidence</h3>
+                                <div className="patterns-grid">
+                                    {parsedFindings.signals.map((sig, i) => (
+                                        <div key={`sig-${i}`} className="glass-card pattern-element-card" style={{ padding: '20px', borderColor: 'rgba(34, 197, 94, 0.15)', background: 'rgba(34, 197, 94, 0.02)' }}>
+                                            <div className="pattern-header">
+                                                <ShieldCheck size={18} style={{ color: '#00ff9d' }} />
+                                                <h4 style={{ color: '#00ff9d' }}>Safety Signal</h4>
                                             </div>
-                                            <div className="comparison-card">
-                                                <div className="cmp-row">
-                                                    <span className="cmp-label">OFFICIAL SOURCE:</span>
-                                                    <span className="cmp-val safe">{result.official_url}</span>
-                                                </div>
-                                                <div className="cmp-divider">VS</div>
-                                                <div className="cmp-row">
-                                                    <span className="cmp-label">SCANNED TARGET:</span>
-                                                    <span className="cmp-val danger">{result.target_url}</span>
-                                                </div>
-                                                <div className="cmp-details">
-                                                    <strong>SECURITY ANALYSIS:</strong> Minor spelling variations detected in the scanned URL. This is a common tactic used in phishing scams to impersonate legitimate brands.
-                                                </div>
-                                            </div>
+                                            <p className="pattern-desc" style={{ marginTop: '8px' }}>{sig}</p>
                                         </div>
-                                    )}
+                                    ))}
+                                </div>
+                            </div>
+                        )}
 
-                                    {/* Hidden Links Extraction for Text Mode */}
-                                    {result.type === 'text' && result.url_analysis && result.url_analysis.length > 0 && (
-                                        <div className="forensic-analysis fade-in">
-                                            <div className="forensic-header">
-                                                <span className="forensic-tag">EMBEDDED LINK AUDIT</span>
-                                                <h3>Scanned Routing Vectors</h3>
-                                            </div>
-                                            <div className="hidden-links-list">
-                                                {result.url_analysis.map((link, idx) => (
-                                                    <div key={idx} className="comparison-card" style={{ marginTop: '20px' }}>
-                                                        <div className="cmp-row" style={{ background: link.is_safe ? 'rgba(100, 255, 218, 0.05)' : 'rgba(255, 77, 77, 0.05)' }}>
-                                                            <span className="cmp-label">DETECTED LINK:</span>
-                                                            <span className={`cmp-val ${link.is_safe ? 'safe' : 'danger'}`}>{link.url}</span>
-                                                        </div>
-                                                        <div className="cmp-details" style={{ color: link.is_safe ? '#64FFDA' : '#ff4d4d', background: link.is_safe ? 'rgba(100,255,218,0.05)' : 'rgba(255,255,255,0.03)' }}>
-                                                            {link.is_safe ? (
-                                                                <><strong>VERIFIED SECURE:</strong> This link was routed through internet domain verification and confirmed as a <strong>{link.official}</strong>.</>
-                                                            ) : (
-                                                                <><strong>THREAT:</strong> This link is impersonating <strong>{link.official}</strong>. It is designed to look official but leads to an unverified or malicious site.</>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* Live Scrape Details */}
-                                    {result.type === 'url' && result.scraped_details && (
-                                        <div className="forensic-analysis fade-in">
-                                            <div className="forensic-header">
-                                                <span className="forensic-tag">LIVE INTERNET SCRAPE</span>
-                                                <h3>Extracted Target Details</h3>
-                                            </div>
-                                            <div className="comparison-card" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '15px' }}>
-                                                <div className="cmp-row" style={{ gridColumn: '1 / -1', marginBottom: '10px' }}>
-                                                    <span className="cmp-label">PAGE TITLE:</span>
-                                                    <span className="cmp-val" style={{ marginLeft: '10px', fontWeight: '500' }}>{result.scraped_details.title}</span>
-                                                </div>
-                                                <div className="cmp-row" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', background: 'rgba(255,255,255,0.05)', padding: '15px', borderRadius: '8px', border: 'none' }}>
-                                                    <span className="cmp-val safe" style={{ fontSize: '24px' }}>{result.scraped_details.linksCount}</span>
-                                                    <span className="cmp-label" style={{ marginTop: '5px' }}>LINKS FOUND</span>
-                                                </div>
-                                                <div className="cmp-row" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', background: 'rgba(255,255,255,0.05)', padding: '15px', borderRadius: '8px', border: 'none' }}>
-                                                    <span className="cmp-val safe" style={{ fontSize: '24px' }}>{result.scraped_details.imagesCount}</span>
-                                                    <span className="cmp-label" style={{ marginTop: '5px' }}>IMAGES DETECTED</span>
-                                                </div>
-                                                <div className="cmp-row" style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', alignItems: 'center', background: 'rgba(255,255,255,0.05)', padding: '15px', borderRadius: '8px', border: 'none' }}>
-                                                    <span className="cmp-val safe" style={{ fontSize: '24px' }}>{result.scraped_details.words}</span>
-                                                    <span className="cmp-label" style={{ marginTop: '5px' }}>TOTAL WORDS</span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    <div className="threat-details-grid">
-                                        {result.findings && result.findings.length > 0 ? (
-                                            result.findings.map((f, index) => (
-                                                <div key={index} className="pattern-pill">
-                                                    <span className="pattern-dot"></span>
-                                                    {typeof f === 'string' ? f : `${f.category || 'Threat'} (${f.count || 1})`}
-                                                </div>
-                                            ))
-                                        ) : (
-                                            <div className="pattern-pill clear">
-                                                <span className="pattern-dot safe"></span>
-                                                Zero Manipulation Patterns Detected
-                                            </div>
-                                        )}
-                                    </div>
-                                </>
-                            )}
+                        <div className="result-nav-actions">
+                            <button className="btn-secondary-large" onClick={() => setResult(null)}>
+                                <RefreshCw size={18} /> Scan Another
+                            </button>
+                            <button className="btn-secondary-large" onClick={() => navigate('/dashboard?view=history')}>
+                                <Activity size={18} /> View History
+                            </button>
+                            <button className="btn-primary-large" onClick={() => navigate('/dashboard')}>
+                                <ArrowLeft size={18} /> Back to Dashboard
+                            </button>
                         </div>
-                    )}
-                </div>
+                    </div>
+                )}
             </main>
         </div>
     );
 };
+
+const LayoutGrid = ({ size }) => <Target size={size} />;
 
 export default Analyze;

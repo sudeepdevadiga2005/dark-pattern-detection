@@ -38,7 +38,7 @@ def ensure_scheme(value):
         return "https://" + value
     return value
 
-def extract_domain_from_anything(value):
+def extract_domain_from_anything(value, preserve_case=False):
     """
     Extract clean domain from raw URL/domain text.
     Supports many TLDs.
@@ -49,14 +49,19 @@ def extract_domain_from_anything(value):
     value = ensure_scheme(value)
     try:
         parsed = urlparse(value)
-        domain = parsed.netloc.lower().strip()
-        if domain.startswith("www."):
+        domain = parsed.netloc.strip()
+        if not preserve_case:
+            domain = domain.lower()
+        if domain.lower().startswith("www."):
             domain = domain[4:]
         if ":" in domain:
             domain = domain.split(":")[0]
             
         # Enforce that domains must actually have a valid TLD structure (.com, .io, etc.)
-        if not re.match(r"^([a-z0-9-]+\.)+[a-z]{2,63}$", domain):
+        doc_match = domain
+        if preserve_case:
+            doc_match = domain.lower()
+        if not re.match(r"^([a-z0-9-]+\.)+[a-z]{2,63}$", doc_match):
             return None
             
         return domain if domain else None
