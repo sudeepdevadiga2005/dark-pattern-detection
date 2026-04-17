@@ -121,15 +121,19 @@ const Analyze = () => {
     };
 
     const getDarkPatternDesc = (cat) => {
-        switch(cat) {
-            case 'Fake Urgency': return "This creates artificial time pressure to force an immediate decision.";
-            case 'Hidden Costs': return "Undisclosed fees or requirements may be hidden in the fine print.";
-            case 'Misdirection': return "This technique influences choice by highlighting specific information while hiding others.";
-            case 'Social Proof': return "Uses potentially fabricated community activity to pressure purchases.";
-            case 'Forced Action': return "Forces the user to take an unnecessary action to proceed.";
-            case 'Obstruction': return "Makes it artificially difficult to cancel or back out of an action.";
-            default: return "Manipulative pattern designed to influence user behavior.";
-        }
+        const c = cat ? cat.toLowerCase() : '';
+        if (c.includes('urgency')) return "This creates artificial time pressure to force an immediate decision.";
+        if (c.includes('cost') || c.includes('hidden')) return "Undisclosed fees or requirements may be hidden in the fine print.";
+        if (c.includes('misdirection')) return "This technique influences choice by highlighting specific information while hiding others.";
+        if (c.includes('social proof') || c.includes('trending')) return "Uses potentially fabricated community activity to pressure purchases.";
+        if (c.includes('forced action')) return "Forces the user to take an unnecessary action to proceed.";
+        if (c.includes('obstruction')) return "Makes it artificially difficult to cancel or back out of an action.";
+        if (c.includes('security pressure')) return "Uses alarming security warnings (e.g. account suspension) to bypass critical thinking.";
+        if (c.includes('scarcity')) return "Indicates limited availability to trigger impulsive buying behavior.";
+        if (c.includes('loss aversion')) return "Frames the choice in terms of potential losses rather than gains to manipulate decisions.";
+        if (c.includes('neural') || c.includes('classification')) return "The neural engine detected complex linguistic patterns typical of deceptive design.";
+        
+        return "Manipulative pattern designed to influence user behavior.";
     };
 
     const parsedFindings = result && !result.error ? analyzeFindings(result.findings) : { threats: [], signals: [] };

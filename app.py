@@ -579,8 +579,9 @@ def dashboard():
         user_info['stats']['safe'] = analyses_col.count_documents({**query, 'safety_status': 'Safe'})
         user_info['stats']['threats'] = user_info['stats']['total_scans'] - user_info['stats']['safe']
         
-        # INCREASED LIMIT: Standardized 500 items for historical archive
-        history = list(analyses_col.find(query).sort('timestamp', -1).limit(500))
+        # FETCH FILTERED HISTORY: Exclude hidden items for display
+        query_with_hidden = {**query, 'hidden': {'$ne': True}}
+        history = list(analyses_col.find(query_with_hidden).sort('timestamp', -1).limit(500))
         for item in history:
             item['_id'] = str(item['_id'])
     else:
@@ -610,7 +611,8 @@ def get_history():
         ]
     } if client_id else user_match
 
-    history = list(analyses_col.find(query).sort('timestamp', -1).limit(500))
+    query_with_hidden = {**query, 'hidden': {'$ne': True}}
+    history = list(analyses_col.find(query_with_hidden).sort('timestamp', -1).limit(500))
     for item in history:
         item['_id'] = str(item['_id'])
     return jsonify(history)
@@ -638,12 +640,32 @@ def ext_analyze():
         'trust_score': result.get('trust_score')
     })
 
+@app.route('/api/hide-analysis', methods=['POST'])
+@login_required
+def hide_analysis():
+    data = request.get_json()
+    analysis_id = data.get('id')
+    if not analysis_id:
+        return jsonify({'success': False, 'message': 'ID required'}), 400
+    
+    if analyses_col is not None:
+        try:
+            analyses_col.update_one(
+                {'_id': ObjectId(analysis_id)},
+                {'$set': {'hidden': True}}
+            )
+            return jsonify({'success': True})
+        except Exception as e:
+            return jsonify({'success': False, 'message': str(e)}), 500
+    return jsonify({'success': False, 'message': 'Database offline'}), 503
+
 @app.route('/api/clear-history', methods=['POST'])
 @login_required
 def clear_user_history():
     username = session.get('user')
     if analyses_col is not None:
-        analyses_col.delete_many({'username': username})
+        # Instead of deleting, we now just hide everything for the user
+        analyses_col.update_many({'username': username}, {'$set': {'hidden': True}})
     return jsonify({'success': True})
 
 @app.route('/api/analyze-text', methods=['POST'])
@@ -884,7 +906,8 @@ def admin_scans():
         return jsonify({'success': False, 'message': 'Database offline'}), 503
         
     # Increased limit to 1000 for total archive transparency
-    scans = list(analyses_col.find({}).sort('timestamp', -1).limit(1000))
+    # Only display entries that have not been hidden by the user or admin
+    scans = list(analyses_col.find({'hidden': {'$ne': True}}).sort('timestamp', -1).limit(1000))
     for scan in scans:
         scan['_id'] = str(scan['_id'])
         
@@ -973,17 +996,17 @@ def clear_logs():
     client_id = data.get('client_id')
     
     if client_id:
-        # SURGICAL PURGE: Only logs for this specific operative
-        result = analyses_col.delete_many({'client_id': str(client_id)})
-        msg = f"Surgical Purge Successful: {result.deleted_count} logs removed for operative {client_id}."
+        # SURGICAL PURGE: Soft-delete logs for this specific operative
+        result = analyses_col.update_many({'client_id': str(client_id)}, {'$set': {'hidden': True}})
+        msg = f"Surgical Purge Successful: {result.modified_count} logs marked as hidden for operative {client_id}. Archival counts preserved."
     else:
         # ARCHIVE PURGE: System-wide operation
         deleted_scans = 0
         deleted_users = 0
         
         if mode in ['logs', 'both']:
-            res = analyses_col.delete_many({})
-            deleted_scans = res.deleted_count
+            res = analyses_col.update_many({}, {'$set': {'hidden': True}})
+            deleted_scans = res.modified_count
             
         if mode in ['accounts', 'both']:
             res = users_col.delete_many({})
@@ -1029,8 +1052,9 @@ def delete_scan(scan_id):
         return jsonify({'success': False, 'message': 'Database offline'}), 503
     try:
         from bson.objectid import ObjectId
-        analyses_col.delete_one({'_id': ObjectId(scan_id)})
-        return jsonify({'success': True, 'message': 'Log entry purged.'})
+        # Perform soft delete to preserve archival statistics
+        analyses_col.update_one({'_id': ObjectId(scan_id)}, {'$set': {'hidden': True}})
+        return jsonify({'success': True, 'message': 'Log entry hidden from all views. Records preserved in database.'})
     except:
         return jsonify({'success': False, 'message': 'Invalid ID'}), 400
 

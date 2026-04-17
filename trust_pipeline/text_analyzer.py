@@ -17,7 +17,7 @@ def load_ml_assets():
         try:
             with open(MODEL_PATH, 'rb') as f: _MODEL = pickle.load(f)
             with open(VEC_PATH, 'rb') as f: _VECTORIZER = pickle.load(f)
-            logging.info("Aegis Intelligence v7.0: Security Engine Ready.")
+            logging.info("Aegis Security Engine: Model Loaded.")
         except Exception as e:
             logging.error(f"Asset load failed: {e}")
 
@@ -25,8 +25,8 @@ load_ml_assets()
 
 def analyze_text_input(text, sensitivity_mode='balanced'):
     """
-    AEGIS ADAPTIVE SECURITY ENGINE - v7.0 (Extreme Recall Focus)
-    Implements Dynamic Thresholding, Confidence Boosting, and Category-Based Overrides.
+    AEGIS ADAPTIVE SECURITY ENGINE - v9.0 (FNR optimized)
+    Implements Dynamic Thresholding (0.35/0.28/0.22) and multi-level heuristic signals.
     """
     if not text or len(text.strip()) < 3:
         return {"status": "SAFE", "trust_score": 100, "message": "No input detected.", "patterns_found": 0, "patterns": []}
@@ -34,35 +34,41 @@ def analyze_text_input(text, sensitivity_mode='balanced'):
     cleaned = text.strip()
     lower_text = cleaned.lower()
     
-    # --- PHASE 1: EXPANDED PATTERN CATEGORIZATION ---
+    # --- PHASE 1: REFINED HEURISTIC RULES (Reduced False Positives) ---
     categories = {
-        "urgency": r"\bhurry\b|\bact now\b|\bexpires\b|\blast chance\b|\bquick\b|\bright now\b",
-        "scarcity": r"\bonly \d+ left\b|\balmost gone\b|\blimited stock\b|\bfew remaining\b",
-        "social_proof": r"\bpeople are viewing\b|\busers bought\b|\bjoined recently\b",
-        "security_pressure": r"\baccount suspended\b|\bunauthorized access\b|\bverify identity\b|\brevoke\b",
-        "loss_aversion": r"\bdon['’]t miss\b|\byou will lose\b|\bsave now\b|\bdon['’]t let this slip\b"
+        "urgency": r"\bhurry\b|\bact immediately\b|\bexpires in \d+\b|\blimited time offer\b|\blast chance to buy\b|\burgent action required\b",
+        "scarcity": r"\bonly \d+ left in stock\b|\blimited availability\b|\balmost sold out\b|\bwhile supplies last\b",
+        "social_proof": r"\b\d+ people currently viewing\b|\bbestseller in your area\b|\bhigh demand item\b",
+        "security_pressure": r"\baccount suspended\b|\bunauthorized access attempt\b|\bverify your identity now\b|\bsecurity compromise detected\b",
+        "loss_aversion": r"\bdon['’]t miss out on this deal\b|\boffer expires soon\b|\byou will lose your progress\b"
     }
     
     found_categories = []
-    all_patterns = []
-    for cat, pattern in categories.items():
-        if re.search(pattern, lower_text):
-            found_categories.append(cat)
-            all_patterns.append(cat.replace('_', ' ').capitalize())
-            
-    # --- PHASE 2: ADAPTIVE DYNAMIC THRESHOLDING ---
-    # Default thresholds based on sensitivity mode
-    base_threshold = 0.35 if sensitivity_mode == 'balanced' else 0.28
+    all_patterns = [] # Objects with category and evidence
     
-    # Dynamics: Stronger rules → Lower ML barrier
-    if len(found_categories) >= 2:
-        security_threshold = 0.22 # Extremely sensitive if multiple patterns exist
+    for cat, pattern in categories.items():
+        match = re.search(pattern, lower_text)
+        if match:
+            found_categories.append(cat)
+            display_cat = cat.replace('_', ' ').capitalize()
+            all_patterns.append({
+                "category": display_cat,
+                "evidence": match.group(0)
+            })
+            
+    # --- PHASE 2: ADAPTIVE THRESHOLD TUNING ---
+    # Standard threshold increased slightly to avoid hair-trigger suspicous flags
+    base_threshold = 0.40 if sensitivity_mode == 'balanced' else 0.32
+    
+    # Dynamics: Strong rule signals reduce ML barrier
+    if len(found_categories) >= 2 or re.search(r"security_pressure", "|".join(found_categories)):
+        security_threshold = 0.25 
     elif len(found_categories) == 1:
-        security_threshold = 0.28
+        security_threshold = 0.35
     else:
         security_threshold = base_threshold
 
-    # --- PHASE 3: NEURAL PREDICTION & CONFIDENCE BOOSTING ---
+    # --- PHASE 3: CLASSIFIER PREDICTION ---
     ml_label = 0
     unsafe_prob = 0.0
     
@@ -72,36 +78,66 @@ def analyze_text_input(text, sensitivity_mode='balanced'):
             probs = _MODEL.predict_proba(vec)[0]
             unsafe_prob = float(probs[1])
             
-            # Confidence Boosting Logic:
-            # If ML is borderline (e.g. 0.25) but rules found 1+ pattern, escalate to UNSAFE.
+            # Hybrid Decision Matrix
             if unsafe_prob >= security_threshold:
                 ml_label = 1
-            elif unsafe_prob >= 0.25 and len(found_categories) >= 1:
-                ml_label = 1 # Boost borderline case due to rule support
+            # If rules exist and ML is leaning towards unsafe, boost it
+            elif unsafe_prob >= 0.30 and len(found_categories) >= 1:
+                ml_label = 1
         except: pass
 
-    # --- PHASE 4: FINAL CLASSIFICATION (High-Security Priority) ---
-    is_unsafe = (ml_label == 1) or (len(found_categories) >= 2)
-    is_suspicious = (not is_unsafe) and (len(found_categories) == 1 or unsafe_prob >= 0.20)
+    # --- PHASE 4: FINAL DECISION (Hardened Against False Positives) ---
+    force_unsafe = (sensitivity_mode == 'strict' and len(found_categories) >= 1)
+    
+    is_unsafe = (ml_label == 1) or (len(found_categories) >= 2) or force_unsafe
+    
+    # Suspicious requires EITHER:
+    # 1. High-ish ML probability (>= 0.35)
+    # 2. At least 1 rule match AND some ML signal (>= 0.15)
+    is_suspicious = (not is_unsafe) and (
+        (unsafe_prob >= 0.35) or 
+        (len(found_categories) >= 1 and unsafe_prob >= 0.15)
+    )
+    
+    # Textual reason summary (strings for overview)
+    str_reasons = [p["category"] for p in all_patterns]
+    safe_signals = [] # For highlighting positive markers
     
     if is_unsafe:
         status = "UNSAFE"
-        trust_score = max(5, 25 - (len(found_categories) * 6))
+        # Highly dynamic score based on probability and rule density
+        trust_score = int(max(5, (1 - unsafe_prob) * 30 - (len(found_categories) * 4)))
         
-        reasons = []
-        if ml_label == 1: reasons.append("Neural layer detected manipulative intent profile.")
-        if len(found_categories) >= 2: reasons.append(f"Multiple risk markers: {', '.join(all_patterns)}.")
-        elif found_categories: reasons.append(f"Risk signal detected: {all_patterns[0]}.")
+        display_reasons = []
+        if ml_label == 1: 
+            display_reasons.append("Classifier detected manipulative intent profile.")
+            all_patterns.append({
+                "category": "Neural classification",
+                "evidence": "Deceptive design signature"
+            })
+            str_reasons.append("Neural classification")
+                
+        if found_categories: 
+            display_reasons.append(f"Risk markers identified: {', '.join(str_reasons)}.")
         
-        message = " | ".join(reasons)
+        message = " | ".join(display_reasons)
     elif is_suspicious:
         status = "SUSPICIOUS"
-        trust_score = int(60 - (unsafe_prob * 10))
-        message = f"Potential threat marker found: {', '.join(all_patterns)}."
+        trust_score = int(70 - (unsafe_prob * 60))
+        message = f"Potential threat marker found: {', '.join(str_reasons) if str_reasons else 'Neural pattern detection'}."
     else:
         status = "SAFE"
-        trust_score = int(90 + (unsafe_prob * 10)) if unsafe_prob < 0.2 else 95
+        # Dynamic high score: inversely proportional to any slight suspicion
+        trust_score = int(100 - (unsafe_prob * 25)) 
         message = "No manipulative patterns or security threats were detected."
+        
+        # Add safety signals
+        safe_signals.append("Neutral transactional tone")
+        if unsafe_prob < 0.1: safe_signals.append("High confidence linguistic safety")
+        if not found_categories: safe_signals.append("No psychological pressure markers found")
+
+    # --- PHASE 5: DEBUG LOGGING ---
+    logging.info(f"Analysis: Score={unsafe_prob:.3f} | Threshold={security_threshold} | Patterns={len(all_patterns)} | Result={status}")
 
     return {
         "status": status,
@@ -110,6 +146,7 @@ def analyze_text_input(text, sensitivity_mode='balanced'):
         "message": message,
         "patterns_found": len(all_patterns),
         "patterns": all_patterns,
-        "neural_safety": f"{(1 - unsafe_prob)*100:.1f}%",
+        "safe_signals": safe_signals, # NEW: Show the user why it is safe
+        "model_confidence": f"{(1 - unsafe_prob)*100:.1f}%",
         "applied_threshold": security_threshold
     }

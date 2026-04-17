@@ -664,6 +664,37 @@ html, body {
     font-size: 13px;
 }
 
+.action-cell {
+    width: 80px;
+    text-align: center;
+}
+
+.btn-erase {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    color: var(--danger-red);
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btn-erase:hover {
+    background: var(--danger-red);
+    color: #fff;
+    border-color: var(--danger-red);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+}
+
+.btn-erase:active {
+    transform: translateY(0) scale(0.95);
+}
+
 /* ACCOUNT SETTINGS VIEW */
 .account-settings-view {
     max-width: 900px;

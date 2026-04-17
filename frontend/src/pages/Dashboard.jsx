@@ -24,8 +24,10 @@ import {
     Mail,
     Calendar,
     Lock,
-    Info
+    Info,
+    Trash2
 } from 'lucide-react';
+import Swal from 'sweetalert2';
 import { 
     LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
     PieChart, Pie, Cell, AreaChart, Area
@@ -72,6 +74,47 @@ const Dashboard = () => {
             window.location.href = '/login';
         } catch (err) {
             window.location.href = '/login';
+        }
+    };
+    
+    const handleHideAnalysis = async (id) => {
+        const result = await Swal.fire({
+            title: 'ERASE RECORD?',
+            text: "This link/text will be removed from your display but preserved in the secure archive for total security metrics.",
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#ff4d4d',
+            cancelButtonColor: '#64FFDA',
+            confirmButtonText: 'YES, ERASE',
+            cancelButtonText: 'KEEP RECORD',
+            background: '#111827',
+            color: '#fff'
+        });
+
+        if (result.isConfirmed) {
+            try {
+                await axios.post(`${API_BASE_URL}/hide-analysis`, { id }, { withCredentials: true });
+                // Update local state to remove the item from view immediately
+                setHistory(prev => prev.filter(item => item._id !== id));
+                
+                Swal.fire({
+                    title: 'ERASED',
+                    text: 'The item has been removed from your audit log.',
+                    icon: 'success',
+                    timer: 1500,
+                    showConfirmButton: false,
+                    background: '#111827',
+                    color: '#64FFDA'
+                });
+            } catch (err) {
+                Swal.fire({
+                    title: 'ERROR',
+                    text: 'Unable to process erasure request.',
+                    icon: 'error',
+                    background: '#111827',
+                    color: '#ff4d4d'
+                });
+            }
         }
     };
 
@@ -204,21 +247,21 @@ const Dashboard = () => {
                                     <div className="tile-icon icon-purple"><Activity size={24} /></div>
                                     <div className="tile-content">
                                         <label>Total Scans</label>
-                                        <h3>{stats.total}</h3>
+                                        <h3>{profile?.stats?.total_scans || 0}</h3>
                                     </div>
                                 </div>
                                 <div className="glass-card stat-tile">
                                     <div className="tile-icon icon-red"><ShieldAlert size={24} /></div>
                                     <div className="tile-content">
                                         <label>Threats Detected</label>
-                                        <h3 className="text-danger">{stats.threats}</h3>
+                                        <h3 className="text-danger">{profile?.stats?.threats || 0}</h3>
                                     </div>
                                 </div>
                                 <div className="glass-card stat-tile">
                                     <div className="tile-icon icon-green"><ShieldCheck size={24} /></div>
                                     <div className="tile-content">
                                         <label>Safe Sites</label>
-                                        <h3 className="text-success">{stats.safe}</h3>
+                                        <h3 className="text-success">{profile?.stats?.safe || 0}</h3>
                                     </div>
                                 </div>
                                 <div className="glass-card stat-tile">
@@ -348,6 +391,7 @@ const Dashboard = () => {
                                             <th>Target Identity</th>
                                             <th>Trust Weight</th>
                                             <th>Captured At</th>
+                                            <th>Action</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -376,6 +420,15 @@ const Dashboard = () => {
                                                         </div>
                                                     </td>
                                                     <td className="date-cell">{h.timestamp}</td>
+                                                    <td className="action-cell">
+                                                        <button 
+                                                            className="btn-erase" 
+                                                            title="Erase from display"
+                                                            onClick={() => handleHideAnalysis(h._id)}
+                                                        >
+                                                            <Trash2 size={16} />
+                                                        </button>
+                                                    </td>
                                                 </tr>
                                             ))}
                                     </tbody>

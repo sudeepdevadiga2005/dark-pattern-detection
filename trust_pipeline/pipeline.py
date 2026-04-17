@@ -143,6 +143,7 @@ def process_url_domain(original_input, input_type):
         "trust_score": max(0, min(100, trust_score)),
         "reason": unique_reasons,
         "patterns": unique_reasons,
+        "findings": unique_reasons, # Added for frontend consistency 
         "patterns_found": len(unique_reasons),
         "type": "url",
         "url": original_input,
@@ -159,6 +160,7 @@ def process_text(original_input):
         "pattern_found": text_result["message"], # Compatibility mapping
         "reason": text_result["message"], # Compatibility mapping
         "patterns": text_result["patterns"],
+        "findings": text_result["patterns"], # Added for frontend consistency
         "patterns_found": text_result["patterns_found"],
         "type": "text",
         "url": original_input[:50] + "..."

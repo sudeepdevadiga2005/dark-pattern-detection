@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 def train_model(data_path='training_data.tsv', model_dir='trust_pipeline/models'):
     """
     Trains a Logistic Regression model for Dark Pattern Detection.
-    Saves the model, vectorizer, and evaluation stats to disk.
+    Optimized for high RECALL / low FNR via Class Balancing and N-Gram features.
     """
     if not os.path.exists(data_path):
         logging.error(f"Training data not found at {data_path}. Please provide training_data.tsv.")
@@ -28,7 +28,6 @@ def train_model(data_path='training_data.tsv', model_dir='trust_pipeline/models'
 
     # Preprocessing
     df['text'] = df['text'].astype(str).str.lower().str.strip()
-    # Map labels to numeric if they are strings
     df['label'] = pd.to_numeric(df['label'], errors='coerce').fillna(0).astype(int)
 
     logging.info(f"Dataset Size: {len(df)} samples.")
@@ -42,18 +41,18 @@ def train_model(data_path='training_data.tsv', model_dir='trust_pipeline/models'
         stratify=df['label']
     )
 
-    # Vectorization (TF-IDF)
-    logging.info("Vectorizing text using TF-IDF...")
+    # Vectorization (TF-IDF) - Expanded for better sub-pattern detection
+    logging.info("Vectorizing text using TF-IDF (1,2-grams)...")
     vectorizer = TfidfVectorizer(
-        max_features=5000, 
+        max_features=10000, 
         ngram_range=(1, 2), 
         stop_words='english'
     )
     X_train_vec = vectorizer.fit_transform(X_train)
     
-    # Train Model (Logistic Regression)
-    logging.info("Training Logistic Regression model...")
-    model = LogisticRegression(class_weight='balanced', max_iter=1000)
+    # Train Model (Logistic Regression) - Priority on detecting the minority class (UNSAFE)
+    logging.info("Training Logistic Regression model with balanced class weights...")
+    model = LogisticRegression(class_weight='balanced', max_iter=2000, solver='lbfgs')
     model.fit(X_train_vec, y_train)
 
     # Create model directory if it doesn't exist
